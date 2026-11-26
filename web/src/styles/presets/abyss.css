@@ -126,9 +126,13 @@ html.dark:root[data-theme-preset="abyss"] {
   --popover: #232c3d;
   --popover-foreground: #eef2f8;
 
-  /* 品牌蓝：暗色下提亮一档，保证在深底上够醒目 */
-  --primary: #5ca6ff;
-  --primary-foreground: #0f1622;
+  /* 主按钮 = **中性浅灰**，不是品牌蓝。
+     实测参考的「新建项目」按钮取色 #b1b1b1（浅灰）配深色文字 —— 全站按钮都是中性色，
+     蓝色只出现在极少数强调位（如 logo、进度条的当前段、侧栏选中指示条）。
+     把 --primary 设为灰色后，51 处 bg-primary 的按钮自动统一，不必逐个组件改。
+     ⚠️ 品牌蓝改由 --ring / --sidebar-primary / 侧栏指示条单独承载。 */
+  --primary: #c8ccd4;
+  --primary-foreground: #15181d;
 
   /* 次级面/悬停：同色 + 极淡白叠加（参考口径），不是另一档色 */
   --secondary: #222b3b;
