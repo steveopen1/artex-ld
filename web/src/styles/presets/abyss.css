@@ -148,23 +148,29 @@ html.dark:root[data-theme-preset="abyss"] {
   /* 描边是暗色的主要分层手段（规则 2）：半透白而不是实色灰 */
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
-  --ring: #5ca6ff;
+  /* 焦点环用中性浅灰：实测参考全站品牌蓝 #5ca6ff 只出现 90 个像素
+     （= 侧栏那根 3px 指示条），没有任何控件用蓝色描边。
+     焦点环仍需可见（无障碍），所以取浅灰而非去掉。 */
+  --ring: #8b93a1;
 
-  --chart-1: oklch(0.72 0.15 252);
-  --chart-2: oklch(0.74 0.12 200);
-  --chart-3: oklch(0.70 0.14 285);
-  --chart-4: oklch(0.78 0.10 160);
-  --chart-5: oklch(0.76 0.13 40);
+  /* 图表色板：实测参考的折线主色是 #5a89c3（低饱和蓝），不是品牌蓝也不是紫。
+     按"同一色相拉开明度"排布，避免出现参考里没有的紫/青。 */
+  --chart-1: #5a89c3;
+  --chart-2: #7ba3d4;
+  --chart-3: #3b6498;
+  --chart-4: #9db9dd;
+  --chart-5: #c2724a;
 
   /* 侧栏 = 截图实测 #191f2b（比页面画布 #202736 略暗一档） */
   --sidebar: #1b2330;
   --sidebar-foreground: #dde2ea;
+  /* 保留品牌蓝：实测参考的侧栏选中指示条正是 #5ca6ff（全站唯一的蓝色） */
   --sidebar-primary: #5ca6ff;
   --sidebar-primary-foreground: #0f1622;
   --sidebar-accent: #232c3d;
   --sidebar-accent-foreground: #f2f4f8;
   --sidebar-border: oklch(1 0 0 / 9%);
-  --sidebar-ring: #5ca6ff;
+  --sidebar-ring: #8b93a1;
 
   /* 阴影：暗色需要更强的扩散才有"浮起"感 */
   --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.30);
