@@ -8,6 +8,13 @@
 
 ### Added
 
+- **修：Abyss 亮色变量盖掉暗色变量**。亮色块原写作 `:root[data-theme-preset="abyss"]`
+  （特异性 0,2,0），高于 globals 的 `.dark`（0,1,0）—— 暗色模式下亮色变量照样生效，
+  表现为**卡片白底黑字、侧栏文字深灰几乎看不见**。
+  改为 `:root:not(.dark)[data-theme-preset="abyss"]`（亮色才生效），并为
+  `.dark[data-theme-preset="abyss"]` 单独补齐 Abyss 的暗色语义变量
+  （--card #18202d / --sidebar #141b27 / --border 白色 8% 等），
+  而不是沿用 globals 的通用暗灰。
 - **修：任务详情接口不返回 token 消耗**。`GET /api/tasks/{id}` 漏填 `Tokens`，
   只有 `GET /api/tasks`（列表）填了 —— 同一任务在列表页显示真实消耗、在详情页显示 0。
   实测任务 #4：列表页 865371 输入 / 41092 输出，详情页全 0。

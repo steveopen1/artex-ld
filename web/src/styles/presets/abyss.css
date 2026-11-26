@@ -24,7 +24,12 @@ value: abyss
    一点蓝调（oklch 色相 250 附近）与玻璃质感，同时保持文字对比度 ≥ AA。
    ═══════════════════════════════════════════════════════════════════════ */
 
-:root[data-theme-preset="abyss"] {
+/* ⚠️ 必须带 :not(.dark) —— 本块特异性要高于 globals 的 `.dark`(0,1,0)，
+   若写成 `:root[data-theme-preset="abyss"]`(0,2,0)，暗色模式下本块的亮色变量
+   会盖掉 `.dark` 的暗色变量：卡片变白底黑字、侧栏文字变深灰。
+   加上 :not(.dark) 后本块只作用于亮色，暗色由 globals 的 `.dark` 接管。
+   Abyss 的暗色端覆盖则由后文 `.dark[data-theme-preset="abyss"]` 单独给。 */
+:root:not(.dark)[data-theme-preset="abyss"] {
   /* 亮色端配色 = 对参考亮色截图（docs/screenshots/02-settings-light.png, 1920×1080）
      做像素采样的实测值：
        外壳缝隙 #fefeff / 侧栏 #ffffff / 画布 #fdfeff（微蓝）/ 控件 #ffffff
@@ -153,9 +158,41 @@ value: abyss
    玻璃 rgba(38,48,68,.55) 必须叠在**外壳**上才合成出 #192131（≈截图 #1b2331）。
    若 html 铺 --background(#1b2331)，玻璃叠上去会亮成 #1f2838（实测）——
    这就是"玻璃反而把底变亮"的原因。 */
+/* Abyss 的暗色端变量（globals 的 `.dark` 是通用暗色，不是 Abyss 配色）。
+   必须写全：--card / --popover / --sidebar 等语义色都要覆盖，
+   否则卡片/弹层会用通用暗灰，而不是 Abyss 的深空玻璃色。 */
 .dark[data-theme-preset="abyss"] {
   background-image: none;
   background-color: #0a0f1a;
+
+  --background: #131a26;
+  --foreground: #e6ebf2;
+  --card: #18202d;
+  --card-foreground: #e6ebf2;
+  --popover: #18202d;
+  --popover-foreground: #e6ebf2;
+
+  --secondary: #1d2634;
+  --secondary-foreground: #dbe2ec;
+  --muted: #1d2634;
+  --muted-foreground: #9aa5b4;
+  --accent: #223042;
+  --accent-foreground: #d6e4f5;
+  --destructive: #e0554b;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.10);
+
+  --sidebar: #141b27;
+  --sidebar-foreground: #dfe5ee;
+  --sidebar-accent: #1e2836;
+  --sidebar-accent-foreground: #e2eaf5;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+
+  --severity-critical: #ff6b6b;
+  --severity-high: #ff7a45;
+  --severity-medium: #f5b544;
+  --severity-low: #8fa3bd;
 }
 
 /* 侧栏：与地面同色 + 半透，让点阵与光池从下面透上来（参考的 shell-sidebar 就是同值）。
