@@ -2441,6 +2441,16 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	dto := taskDTO(t, s.resolvedTaskStatus(t))
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	applyTaskArchiveBlocker(&dto, archiveBlockers)
+	// Tokens 必须与 listTasks 同源同口径（TaskListMetricsAll → kind='result' 的活动行聚合）。
+	// 此前 getTask 漏填，任务详情页/详情接口一律显示 0 消耗 —— 而列表页显示真实值，
+	// 同一任务两个地方数字对不上。修这里而不是改前端，前端只有一处读法。
+	metrics, _ := s.m.PG().TaskListMetricsAll()
+	if metric, ok := metrics[t.ExpID]; ok {
+		dto.Tokens = tokenTotalDTO(metric.Tokens)
+		dto.GoalsTotal = metric.Goals.Total
+		dto.GoalsMet = metric.Goals.Met
+		dto.InFlight = metric.RunningIntents
+	}
 	writeJSON(w, 200, dto)
 }
 

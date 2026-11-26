@@ -8,6 +8,11 @@
 
 ### Added
 
+- **修：任务详情接口不返回 token 消耗**。`GET /api/tasks/{id}` 漏填 `Tokens`，
+  只有 `GET /api/tasks`（列表）填了 —— 同一任务在列表页显示真实消耗、在详情页显示 0。
+  实测任务 #4：列表页 865371 输入 / 41092 输出，详情页全 0。
+  `getTask` 改为与 `listTasks` 同源（`TaskListMetricsAll` → `kind='result'` 活动行聚合），
+  同时补上 `GoalsTotal`/`GoalsMet`/`InFlight`（这三个字段同样只有列表页有）。
 - **亮色模式按参考亮色截图重做**（`docs/screenshots/02-settings-light.png` 像素采样）：
   实测外壳 `#fefeff` / 侧栏 `#ffffff` / 画布 `#fdfeff`（微蓝）/ 控件 `#ffffff`，
   内容区亮度 p5=248 p50=254 p95=255 —— **几乎纯白**，只有极淡蓝调。
