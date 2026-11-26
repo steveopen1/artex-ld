@@ -25,14 +25,22 @@ value: abyss
    ═══════════════════════════════════════════════════════════════════════ */
 
 :root[data-theme-preset="abyss"] {
-  /* 亮色端：保持与默认一致的可用性，避免选了 Abyss 但系统是亮色时反而变差。 */
+  /* 亮色端配色 = 对参考亮色截图（docs/screenshots/02-settings-light.png, 1920×1080）
+     做像素采样的实测值：
+       外壳缝隙 #fefeff / 侧栏 #ffffff / 画布 #fdfeff（微蓝）/ 控件 #ffffff
+       内容区亮度 p5=248 p25=252 p50=254 p75=255 p95=255
+     即**几乎纯白**，只有极淡的蓝调（不是灰蓝）。
+
+     此前我把亮色侧栏做成冷灰蓝(#7f8794 那档视觉)、画布纯白 —— 与参考正好相反：
+     参考是"侧栏和画布都接近纯白，靠 1px 描边与极淡蓝底纹分层"。
+
+     语义色保持与默认一致（白底上要够深才可读）。 */
   --severity-critical: #e11d48;
   --severity-high: #dc2626;
   --severity-medium: #b45309;
   --severity-low: #475569;
-  /* 直角：项目统一禁用圆角卡片/按钮。--radius 归零后，shadcn 派生的
-     --radius-sm/md/lg/xl（calc(--radius ± Npx)）全部落到 0 或负值，
-     负值会被浏览器钳成 0，所以整站自然变成直角，不需要逐组件改类名。 */
+
+  /* 直角：项目统一禁用圆角卡片/按钮。 */
   --radius: 0px;
   --radius-sm: 0px;
   --radius-md: 0px;
@@ -42,151 +50,60 @@ value: abyss
   --radius-3xl: 0px;
   --radius-4xl: 0px;
 
-  --background: oklch(0.985 0.002 250);
-  --foreground: oklch(0.21 0.012 250);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.012 250);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.012 250);
+  /* 画布：实测 #fdfeff（几乎白，带 1 点蓝） */
+  --background: #fdfeff;
+  --foreground: #1b2026;
 
-  /* 品牌蓝：只用于交互元素（主按钮/链接/焦点环/选中块），不铺大面积 */
-  --primary: oklch(0.58 0.17 252);
-  --primary-foreground: oklch(0.995 0 0);
+  /* 卡片/弹层：纯白 —— 从几乎白的画布上靠 1px 描边与极轻阴影浮起 */
+  --card: #ffffff;
+  --card-foreground: #1b2026;
+  --popover: #ffffff;
+  --popover-foreground: #1b2026;
 
-  --secondary: oklch(0.968 0.005 250);
-  --secondary-foreground: oklch(0.28 0.014 250);
-  --muted: oklch(0.968 0.005 250);
-  --muted-foreground: oklch(0.52 0.014 250);
-  --accent: oklch(0.955 0.012 252);
-  --accent-foreground: oklch(0.30 0.05 252);
-  --destructive: oklch(0.58 0.20 25);
-
-  --border: oklch(0.91 0.006 250);
-  --input: oklch(0.93 0.006 250);
-  --ring: oklch(0.58 0.17 252);
-
-  --chart-1: oklch(0.62 0.16 252);
-  --chart-2: oklch(0.66 0.13 200);
-  --chart-3: oklch(0.60 0.15 285);
-  --chart-4: oklch(0.72 0.11 160);
-  --chart-5: oklch(0.68 0.14 40);
-
-  --sidebar: oklch(0.975 0.004 250);
-  --sidebar-foreground: oklch(0.24 0.012 250);
-  --sidebar-primary: oklch(0.58 0.17 252);
-  --sidebar-primary-foreground: oklch(0.995 0 0);
-  --sidebar-accent: oklch(0.945 0.012 252);
-  --sidebar-accent-foreground: oklch(0.30 0.05 252);
-  --sidebar-border: oklch(0.91 0.006 250);
-  --sidebar-ring: oklch(0.58 0.17 252);
-
-  --shadow-2xs: 0 1px 2px 0 hsl(250 20% 12% / 0.04);
-  --shadow-xs: 0 1px 2px 0 hsl(250 20% 12% / 0.05);
-  --shadow-sm: 0 1px 3px 0 hsl(250 20% 12% / 0.07), 0 1px 2px -1px hsl(250 20% 12% / 0.06);
-  --shadow: 0 1px 3px 0 hsl(250 20% 12% / 0.08), 0 1px 2px -1px hsl(250 20% 12% / 0.06);
-  --shadow-md: 0 4px 12px -6px hsl(250 20% 12% / 0.12), 0 1px 3px -1px hsl(250 20% 12% / 0.08);
-  --shadow-lg: 0 12px 32px -16px hsl(250 20% 12% / 0.18), 0 2px 8px -4px hsl(250 20% 12% / 0.10);
-  --shadow-xl: 0 24px 48px -24px hsl(250 20% 12% / 0.22);
-  --shadow-2xl: 0 32px 64px -32px hsl(250 20% 12% / 0.26);
-}
-
-/* 提一档特异性：globals.css 里 `.dark{}` 的基础块排在 preset import 之后，
-   同特异性时后写的赢，会把 --background 覆盖回默认亮色（实测背景解析成 lab(98%)）。
-   用 `html.dark`（元素+类）比较 `.dark`（单类）高一档特异性，且能真正匹配。
-   ⚠️ 不能用 `.dark.dark`：重复类名在同一元素上浏览器判 false（实测 matches() 为 false）。 */
-html.dark:root[data-theme-preset="abyss"] {
-  /* 语义色：同一柔和档（对比度按 oklch(0.205 .012 250) 画布实测过 AA） */
-  --severity-critical: #fb7185;
-  --severity-high: #fca5a5;
-  --severity-medium: #e8b268;
-  --severity-low: #94a3b8;
-  /* 同上：直角 */
-  --radius: 0px;
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
-  --radius-2xl: 0px;
-  --radius-3xl: 0px;
-  --radius-4xl: 0px;
-
-  /* 全部取自 alkaid 暗色截图的**像素采样**（不是从 CSS 变量猜的）：
-       外壳缝隙  #0f1216
-       侧栏      #191f2b
-       页面画布  #202736
-       卡片      #202939   ← 与画布只差 ~3，靠描边分隔，不靠色差
-       卡片悬停  #25344b
-     之前的 #252b37 是 --alkaid-panel-solid 的值，但那是**玻璃面板的不透明等价色**，
-     实际渲染时玻璃下面还压着 ground，合成出来是 #1b2333~#202736 这个深蓝档。 */
-  --background: #1b2331;
-  --foreground: #e8ecf3;
-
-  --card: #202939;
-  --card-foreground: #e8ecf3;
-  --popover: #232c3d;
-  --popover-foreground: #eef2f8;
-
-  /* 主按钮 = **中性浅灰**，不是品牌蓝。
-     实测参考的「新建项目」按钮取色 #b1b1b1（浅灰）配深色文字 —— 全站按钮都是中性色，
-     蓝色只出现在极少数强调位（如 logo、进度条的当前段、侧栏选中指示条）。
-     把 --primary 设为灰色后，51 处 bg-primary 的按钮自动统一，不必逐个组件改。
-     ⚠️ 品牌蓝改由 --ring / --sidebar-primary / 侧栏指示条单独承载。 */
-  --primary: #c8ccd4;
+  /* 主按钮：亮色同样是**中性浅灰底 + 深字**（与暗色口径一致，参考全站按钮皆中性色） */
+  --primary: #e8eaee;
   --primary-foreground: #15181d;
 
-  /* 次级面/悬停：同色 + 极淡白叠加（参考口径），不是另一档色 */
-  --secondary: #222b3b;
-  --secondary-foreground: #e3e8f0;
-  --muted: #222b3b;
-  /* 参考实测：--text-secondary #A7ABB2 对 #0D0F12 = 8.5:1；
-     他们踩过 #8b93a1 只有 4.04:1 的坑，所以这一档不能压太暗。 */
-  --muted-foreground: #a7abb2;
-  --accent: #2f3644;
-  --accent-foreground: #f2f4f8;
-  --destructive: #e06a62;
+  --secondary: #f4f6f9;
+  --secondary-foreground: #24292f;
+  --muted: #f4f6f9;
+  --muted-foreground: #5f6773;
+  --accent: #eef4fb;
+  --accent-foreground: #1f3d5c;
+  --destructive: #c4342b;
 
-  /* 描边是暗色的主要分层手段（规则 2）：半透白而不是实色灰 */
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 14%);
-  /* 焦点环用中性浅灰：实测参考全站品牌蓝 #5ca6ff 只出现 90 个像素
-     （= 侧栏那根 3px 指示条），没有任何控件用蓝色描边。
-     焦点环仍需可见（无障碍），所以取浅灰而非去掉。 */
+  /* 描边：亮色靠它分层，取略深的冷灰（参考的行分隔线清晰但不重） */
+  --border: #e3e8ef;
+  --input: #e8ecf2;
   --ring: #8b93a1;
 
-  /* 图表色板：实测参考的折线主色是 #5a89c3（低饱和蓝），不是品牌蓝也不是紫。
-     按"同一色相拉开明度"排布，避免出现参考里没有的紫/青。 */
+  /* 图表：参考折线为 #5a89c3 系 */
   --chart-1: #5a89c3;
   --chart-2: #7ba3d4;
   --chart-3: #3b6498;
   --chart-4: #9db9dd;
   --chart-5: #c2724a;
 
-  /* 侧栏 = 截图实测 #191f2b（比页面画布 #202736 略暗一档） */
-  --sidebar: #1b2330;
-  --sidebar-foreground: #dde2ea;
-  /* 保留品牌蓝：实测参考的侧栏选中指示条正是 #5ca6ff（全站唯一的蓝色） */
+  /* 侧栏：实测 #ffffff —— 与画布几乎同色，靠右缘 1px 描边分开 */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1b2026;
   --sidebar-primary: #5ca6ff;
-  --sidebar-primary-foreground: #0f1622;
-  --sidebar-accent: #232c3d;
-  --sidebar-accent-foreground: #f2f4f8;
-  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f5fa;
+  --sidebar-accent-foreground: #1f3d5c;
+  --sidebar-border: #e3e8ef;
   --sidebar-ring: #8b93a1;
 
-  /* 阴影：暗色需要更强的扩散才有"浮起"感 */
-  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.30);
-  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.34);
-  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.40), 0 1px 2px -1px rgb(0 0 0 / 0.34);
-  --shadow: 0 2px 6px -2px rgb(0 0 0 / 0.44), 0 1px 2px -1px rgb(0 0 0 / 0.34);
-  --shadow-md: 0 8px 20px -12px rgb(0 0 0 / 0.58), 0 2px 6px -3px rgb(0 0 0 / 0.42);
-  --shadow-lg: 0 18px 40px -22px rgb(0 0 0 / 0.68), 0 4px 12px -6px rgb(0 0 0 / 0.46);
-  --shadow-xl: 0 28px 60px -28px rgb(0 0 0 / 0.72);
-  --shadow-2xl: 0 40px 80px -36px rgb(0 0 0 / 0.78);
+  --shadow-2xs: 0 1px 2px 0 hsl(220 20% 40% / 0.04);
+  --shadow-xs: 0 1px 2px 0 hsl(220 20% 40% / 0.05);
+  --shadow-sm: 0 1px 3px 0 hsl(220 20% 40% / 0.07), 0 1px 2px -1px hsl(220 20% 40% / 0.05);
+  --shadow: 0 1px 3px 0 hsl(220 20% 40% / 0.08), 0 1px 2px -1px hsl(220 20% 40% / 0.05);
+  --shadow-md: 0 4px 12px -6px hsl(220 20% 40% / 0.12), 0 1px 3px -1px hsl(220 20% 40% / 0.07);
+  --shadow-lg: 0 12px 32px -16px hsl(220 20% 40% / 0.16), 0 2px 8px -4px hsl(220 20% 40% / 0.08);
+  --shadow-xl: 0 24px 48px -24px hsl(220 20% 40% / 0.20);
+  --shadow-2xl: 0 32px 64px -32px hsl(220 20% 40% / 0.24);
 }
 
-/* ── 暗色的材质细节：玻璃侧栏 / 吸顶表头 / 深井面板 ───────────────────
-   这些不是 shadcn 标准变量，只在 Abyss 暗色下生效，用来补齐"扁平深灰卡片"
-   缺少的层次感。全部走半透 + 描边，不换色相（规则 2）。 */
-[data-theme-preset="abyss"] .dark .abyss-glass,
 .dark.dark[data-theme-preset="abyss"] .abyss-glass {
   background: color-mix(in oklab, var(--card) 82%, transparent);
   backdrop-filter: blur(8px) saturate(1.2);
@@ -537,4 +454,67 @@ html.dark:root[data-theme-preset="abyss"] {
 }
 .abyss-backdrop[data-abyss-still="1"] .abyss-backdrop__layer {
   transform: none !important;
+}
+
+/* ═══════════ 亮色：玻璃 + 淡蓝点阵 ═══════════
+   参考亮色截图里能看到极淡的蓝色点阵（放大后是 8~10px 间距的小点），
+   以及侧栏/画布都接近纯白、靠 1px 描边分层。
+   暗色的"玻璃叠在外壳上"在这里同样成立：外壳 #fefeff 上叠 30% 白玻璃。 */
+
+/* 亮色背板：只放点阵，不铺色（底色由 html 承担） */
+:root:not(.dark)[data-theme-preset="abyss"] .abyss-backdrop {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background-color: #fdfeff;
+}
+
+:root:not(.dark)[data-theme-preset="abyss"] body > *:not(.abyss-backdrop) {
+  position: relative;
+  z-index: 1;
+}
+
+:root:not(.dark) .abyss-backdrop__layer {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(90, 137, 195, 0.085) 1px, transparent 0);
+  background-size: 26px 26px;
+  will-change: transform;
+  transition: transform 340ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translate3d(
+    calc(var(--abyss-px, 0) * 5px),
+    calc(var(--abyss-py, 0) * 5px),
+    0
+  );
+}
+
+/* 亮色：光池更淡（白底上强光会直接过曝） */
+:root:not(.dark) .abyss-backdrop__glow {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1100px 620px at 74% -12%, rgba(122, 163, 212, 0.10), transparent 62%),
+    radial-gradient(900px 560px at 6% 108%, rgba(150, 170, 200, 0.07), transparent 60%);
+  pointer-events: none;
+}
+
+/* 亮色外壳/玻璃：与暗色同构 —— html 铺外壳白，两块面板叠 30% 白玻璃 */
+:root:not(.dark)[data-theme-preset="abyss"] {
+  background-color: #fefeff;
+}
+:root:not(.dark)[data-theme-preset="abyss"] [data-slot="sidebar-inner"] {
+  background: rgba(255, 255, 255, 0.72);
+  border-right: 1px solid var(--sidebar-border);
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+}
+:root:not(.dark)[data-theme-preset="abyss"] [data-slot="sidebar-inset"] {
+  background: rgba(255, 255, 255, 0.80);
+  border: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
 }
