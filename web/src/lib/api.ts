@@ -293,6 +293,7 @@ const API_KEYS = [
   "interceptDetail",
   "interceptHistory",
   "interceptHistoryPage",
+  "interceptHistoryStats",
   "interceptTask",
   "interceptTaskPage",
   "interceptGetToolConfig",

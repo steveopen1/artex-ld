@@ -217,6 +217,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	// taskFromPG 再把它挂到每个任务的 Guard 上。只在这里注入一次，避免 manager
 	// 反向依赖 *Server。
 	m.trafficMatcherFactory = s.trafficMatcherForTask
+	m.scopeCheckerFactory = s.scopeCheckerForTask
+	// 代理层闸门是后置设置：forward proxy 在 Manager 构造时就建好了。
+	m.SetProxyScopeGate(s.proxyScopeGate)
 	// 【二开·P-EXEC·S1】engine.providerFn：执行器 agent 的 LLM 装配回调（走 providerForProfile 缓存链）
 	s.engine.providerFn = s.providerForProfile
 	s.initSideQuestions()
@@ -433,6 +436,9 @@ func (s *Server) restoreTaskRuntimes() {
 			s.engine.startDeadlineCoordinator(s.ctx, t)
 		}
 	}
+	// 启动卫生：把"看起来还活着但其实没人管"的状态诚实化。
+	// 这里只做核查与记录，不阻塞启动 —— 主循环起来之后再异步跑。
+	go s.reconcileStaleRuntimes()
 	go newScheduler(s).Run(s.ctx)
 	// Restore every task that had already been admitted before shutdown. Starting
 	// only the active UI task left other non-queued tasks counted as concurrency
@@ -1354,6 +1360,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/intercept/pending/{id}", s.interceptGetOne)
 	mux.HandleFunc("POST /api/intercept/pending/{id}/decide", s.interceptDecide)
 	mux.HandleFunc("GET /api/intercept/history", s.interceptHistory)
+	// 按规则聚合的命中统计。注册在 /history 之后、/history/{id} 之前：Go 1.22 ServeMux
+	// 里字面量段 /stats 优先于通配 {id}，不会把 stats 当成一个审批 id。
+	mux.HandleFunc("GET /api/intercept/history/stats", s.interceptHistoryStats)
 	mux.HandleFunc("GET /api/intercept/history/{id}", s.interceptDetail)
 	mux.HandleFunc("GET /api/intercept/history/{id}/execution", s.interceptExecution)
 	mux.HandleFunc("GET /api/intercept/task/{taskID}", s.interceptListTaskItems)

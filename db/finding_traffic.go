@@ -340,7 +340,10 @@ type RecordFindingInput struct {
 }
 
 type RecordedFinding struct {
-	FindingID int64           `json:"finding_id,string"`
+	// DuplicateOf 非 0 表示这条 finding 命中了写入层去重，指向先落库的那条。
+	// 调用方（report_finding 工具）据此在返回里提示 agent 不要重复上报。
+	DuplicateOf int64
+	FindingID   int64           `json:"finding_id,string"`
 	NodeID    int64           `json:"finding_node_id,string"`
 	Traffic   *FindingTraffic `json:"traffic"`
 }
@@ -398,10 +401,32 @@ VALUES($1,'finding',$2,9,'confirmed',$3) RETURNING id`, in.ExplorationID, string
 		assets = []int64{}
 	}
 	raw, _ := json.Marshal(assets)
-	if err := tx.QueryRow(`INSERT INTO findings(task_id,node_id,vulnclass,name,severity,summary,evidence,worker,asset_ids)
-VALUES(NULLIF($1,0),$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, in.TaskID, out.NodeID, in.VulnClass, in.Name, in.Severity, in.Summary, in.Evidence, in.Worker, string(raw)).Scan(&out.FindingID); err != nil {
+
+	// —— 写入层去重（四层流水线的第 1-2 层）——
+	// 之前 findings 插入前没有任何查重，去重全靠事后的语义合并工具，于是同一个
+	// 漏洞被反复上报时会在列表里堆成好几条，报告侧只能靠人工并。
+	// 这里用"扩展键"做一道机械查重：同 task + 同 vulnclass + 同资产集合 + 同端点
+	// 视为同一条。命中不拒写，而是写进去并标记 duplicate_of —— 判定是启发式的，
+	// 误判时数据还在，人工改回来即可。
+	dedupKey := findingDedupKey(in.VulnClass, assets, in.Evidence)
+	var dupOf int64
+	if dedupKey != "" && in.TaskID != 0 {
+		_ = tx.QueryRow(`SELECT id FROM findings
+WHERE task_id=$1 AND dedup_key=$2 AND COALESCE(duplicate_of,0)=0 AND status <> 'duplicate'
+ORDER BY id ASC LIMIT 1`, in.TaskID, dedupKey).Scan(&dupOf)
+	}
+	finalStatus := "pending"
+	if dupOf > 0 {
+		finalStatus = "duplicate"
+	}
+	if err := tx.QueryRow(`INSERT INTO findings(task_id,node_id,vulnclass,name,severity,summary,evidence,worker,asset_ids,status,dedup_key,duplicate_of)
+VALUES(NULLIF($1,0),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULLIF($12,0)) RETURNING id`,
+		in.TaskID, out.NodeID, in.VulnClass, in.Name, in.Severity, in.Summary, in.Evidence, in.Worker, string(raw),
+		finalStatus, dedupKey, dupOf).Scan(&out.FindingID); err != nil {
 		return nil, err
 	}
+	// 把命重信息带回给调用方，agent 读 tool 返回时能看到"这条疑似重复于 #N"。
+	out.DuplicateOf = dupOf
 	// 在**同一事务**里登记一条推送事件：提交即保证「漏洞落库」与「推送任务存在」
 	// 原子一致，不存在提交成功却没入队、消息永久丢失的窗口。
 	// 这里的失败被隔离在保存点上、不影响漏洞写入（见函数注释），因此忽略返回值。

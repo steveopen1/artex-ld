@@ -65,7 +65,7 @@ LABELS = {
         "info_target": "影响目标", "info_severity": "风险等级", "info_found": "发现时间",
         "sub_desc": "1. 漏洞描述", "sub_url": "2. URL", "sub_module": "3. 所属模块",
         "sub_process": "4. 测试过程", "sub_risk": "5. 风险分析",
-        "sub_fix": "6. 修复建议", "sub_status": "7. 修复情况",
+        "sub_fix": "6. 修复建议", "sub_status": "7. 修复情况", "sub_retest": "8. 复测结论", "retest_at": "复测时间：{d}",
         "chk_pass": "通过", "chk_fail": "不通过",
         "kv_sep": "：", "lparen": "（", "rparen": "）", "cvss_sep": "/", "cvss_word": "CVSS分值",
         "cvss_vector_row": "CVSS 向量", "cvss_overall": "综合评分 {c}",
@@ -111,7 +111,7 @@ LABELS = {
         "info_target": "影響目標", "info_severity": "風險等級", "info_found": "發現時間",
         "sub_desc": "1. 漏洞描述", "sub_url": "2. URL", "sub_module": "3. 所屬模組",
         "sub_process": "4. 測試過程", "sub_risk": "5. 風險分析",
-        "sub_fix": "6. 修復建議", "sub_status": "7. 修復情況",
+        "sub_fix": "6. 修復建議", "sub_status": "7. 修復情況", "sub_retest": "8. 複測結論", "retest_at": "複測時間：{d}",
         "chk_pass": "通過", "chk_fail": "不通過",
         "kv_sep": "：", "lparen": "（", "rparen": "）", "cvss_sep": "/", "cvss_word": "CVSS分值",
         "cvss_vector_row": "CVSS 向量", "cvss_overall": "綜合評分 {c}",
@@ -157,7 +157,7 @@ LABELS = {
         "info_target": "Target", "info_severity": "Severity", "info_found": "Date Found",
         "sub_desc": "1. Description", "sub_url": "2. URL", "sub_module": "3. Affected Module",
         "sub_process": "4. Test Process", "sub_risk": "5. Risk Analysis",
-        "sub_fix": "6. Remediation", "sub_status": "7. Remediation Status",
+        "sub_fix": "6. Remediation", "sub_status": "7. Remediation Status", "sub_retest": "8. Retest Result", "retest_at": "Retested at: {d}",
         "chk_pass": "Pass", "chk_fail": "Fail",
         "kv_sep": ": ", "lparen": " (", "rparen": ")", "cvss_sep": " / ", "cvss_word": "CVSS ",
         "cvss_vector_row": "CVSS Vector", "cvss_overall": "Overall score {c}",
@@ -779,6 +779,14 @@ def build_vuln(doc, v, meta):
     # 7. 修复情况
     add_paragraph(doc, L(meta, "sub_status"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
     add_body_text(doc, v.get('fix_status') or '—')
+    # 8. 复测结论：只在真跑过复测且拿到结论时输出，未复测的条目整段跳过，
+    # 避免每条漏洞都挂一个空标题。
+    if v.get('retest_summary') or v.get('retest_at'):
+        add_paragraph(doc, L(meta, "sub_retest"), font=UI_FONT, size_pt=11, bold=True, space_before=6, space_after=2)
+        if v.get('retest_summary'):
+            add_body_text(doc, v.get('retest_summary'))
+        if v.get('retest_at'):
+            add_body_text(doc, L(meta, "retest_at").format(d=v.get('retest_at')))
 
 
 def build_ch4(doc, data, meta):

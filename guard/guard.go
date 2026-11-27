@@ -67,6 +67,13 @@ type Guard struct {
 	// command, so the reminder can carry real request/response evidence instead of
 	// just the command text. nil = no traffic evidence (feature off / no store).
 	trafficFn   func(ctx context.Context, tool, command string) []BlockedTraffic
+	// scopeFn 是任务范围校验钩子：给定工具名与命令文本，返回 (是否拦截, 原因)。
+	// 为什么放在 guard 而不是 agent 层：guard 已经挂在每个 worker/chat 的
+	// PreToolUse 上，是唯一能看到"所有工具调用 + 完整命令文本"的地方；
+	// 而 ScopeMatcher 需要 taskID 与 DB，只有 server 层有 —— 所以这里只留
+	// 一个函数钩子，由 server 注入（与 trafficFn 完全同构）。
+	// nil = 不做范围校验（未配置 / chat 场景）。
+	scopeFn func(ctx context.Context, tool, command string) (block bool, reason string)
 	reg         *hook.Registry
 	interceptor interceptorAPI // optional; nil disables user-configured rules
 }
@@ -120,10 +127,29 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		cmd = in.Text
 	}
 	result := g.applyIntercept(ctx, ev, cmd)
-	if result.Decision != "block" {
-		g.record(ev.ToolName, "allow", "", cmd)
+	if result.Decision == "block" {
+		return result
 	}
+	// 范围校验在拦截规则之后：规则是"这个动作本身被禁"，范围是"这个目标被禁"。
+	// 两者都过才放行。只对携带命令文本的工具有效（Bash/shell_*）—— 其余工具
+	// 的目标可从结构化参数里拿到，由各自工具内部自查（见 customtool 与 run_tool）。
+	if blocked, reason := g.checkScope(ctx, ev.ToolName, cmd); blocked {
+		g.record(ev.ToolName, "deny", "范围外目标", cmd)
+		return hook.Result{Decision: "block", Message: reason}
+	}
+	g.record(ev.ToolName, "allow", "", cmd)
 	return result
+}
+
+// checkScope 调用注入的范围校验器；未注入或命令为空时直接放行。
+func (g *Guard) checkScope(ctx context.Context, tool, cmd string) (bool, string) {
+	g.mu.Lock()
+	fn := g.scopeFn
+	g.mu.Unlock()
+	if fn == nil || strings.TrimSpace(cmd) == "" {
+		return false, ""
+	}
+	return fn(ctx, tool, cmd)
 }
 
 // applyIntercept evaluates user-configured intercept rules against the tool call.
@@ -238,6 +264,17 @@ func (g *Guard) SetTrafficMatcher(fn func(ctx context.Context, tool, command str
 	}
 	g.mu.Lock()
 	g.trafficFn = fn
+	g.mu.Unlock()
+}
+
+// SetScopeChecker 注入任务范围校验钩子。与 SetTrafficMatcher 同构：
+// guard 不持有 taskID，也不 import server，只调用注入进来的判定函数。
+func (g *Guard) SetScopeChecker(fn func(ctx context.Context, tool, command string) (bool, string)) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.scopeFn = fn
 	g.mu.Unlock()
 }
 

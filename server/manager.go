@@ -313,6 +313,10 @@ type Manager struct {
 	// trafficMatcherFactory 由 Server 注入：按 taskID 构造「被拦命令 → 真实报文」
 	// 的匹配器，供 guard 在拦截提醒里附带流量证据。nil = 不附带证据。
 	trafficMatcherFactory func(taskID int64) func(context.Context, string, string) []guard.BlockedTraffic
+	// scopeCheckerFactory 由 Server 注入：按 taskID 构造「命令文本 → 是否越界」判定器。
+	// 与 trafficMatcherFactory 完全同构 —— Manager 不 import server，
+	// 也不该知道 ScopeMatcher 怎么建。
+	scopeCheckerFactory func(taskID int64) func(context.Context, string, string) (bool, string)
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
@@ -1115,6 +1119,31 @@ func (m *Manager) ProxyAddr() string {
 	return maskSecrets(global)
 }
 
+// SetProxyScopeGate 注入代理层的任务范围闸门。
+// 代理是 Manager 级单例、在构造时创建，所以不是构造期注入而是后置设置；
+// 未设置时代理不做范围判定（向后兼容）。
+func (m *Manager) SetProxyScopeGate(gate func(taskID int64, host string) (string, bool)) {
+	if m == nil || m.forwardProxy == nil {
+		return
+	}
+	m.forwardProxy.gate = gate
+}
+
+// ProxyAddrForTask 返回带任务凭证的代理地址。
+// 只有走本地 forward proxy 时才有意义（它知道怎么用 userinfo 归属流量）；
+// 录制 MITM 或直连出口时退回普通地址 —— 那些路径的目标归属由别的机制处理。
+func (m *Manager) ProxyAddrForTask(taskID int64) string {
+	base := m.ProxyAddr()
+	if m.forwardProxy == nil || taskID <= 0 {
+		return base
+	}
+	// 只有 base 正好是本地 forward proxy 时才加凭证，否则会指向错误端口。
+	if base != m.forwardProxy.Addr() {
+		return base
+	}
+	return m.forwardProxy.URLForTask(taskID)
+}
+
 // ProxyCACert returns the CA cert path agents must trust to verify HTTPS through
 // the egress proxy. Non-empty ONLY when traffic capture is on (the MITM re-signs
 // certs): the global proxy used directly (capture off) is a plain forwarder that
@@ -1258,6 +1287,11 @@ func taskFromPG(m *Manager, pt *pgdb.Task, store *pgdb.ExplorationStore, ic *int
 			if matcher := m.serverTrafficMatcher(tid); matcher != nil {
 				t.Guard.SetTrafficMatcher(matcher)
 			}
+			// 范围校验：让 Bash/shell_* 也受任务授权范围约束。
+			// 之前只有 run_tool 受管工具校验，worker 用 curl 打范围外目标拦不住。
+			if checker := m.serverScopeChecker(tid); checker != nil {
+				t.Guard.SetScopeChecker(checker)
+			}
 		}
 	}
 	return t
@@ -1270,6 +1304,14 @@ func (m *Manager) serverTrafficMatcher(taskID int64) func(context.Context, strin
 		return nil
 	}
 	return m.trafficMatcherFactory(taskID)
+}
+
+// serverScopeChecker 按 taskID 取范围判定器（由 Server 注入工厂）。
+func (m *Manager) serverScopeChecker(taskID int64) func(context.Context, string, string) (bool, string) {
+	if m == nil || m.scopeCheckerFactory == nil || taskID <= 0 {
+		return nil
+	}
+	return m.scopeCheckerFactory(taskID)
 }
 
 // ptDBGetSetting 通过探索存储拿到同一个 DB 句柄读设置；store 为 nil 时返回空。

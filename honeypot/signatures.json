@@ -1,0 +1,130 @@
+[
+  {
+    "id": "cowrie-title",
+    "name": "Cowrie",
+    "kind": "title",
+    "pattern": "(?i)cowrie",
+    "weight": 90,
+    "source": "Cowrie 默认 Web 界面/文档标题；开源 SSH/Telnet 蜜罐"
+  },
+  {
+    "id": "cowrie-banner",
+    "name": "Cowrie",
+    "kind": "banner",
+    "pattern": "SSH-2\\.0-OpenSSH_6\\.0p1 Debian-4\\+deb7u2",
+    "weight": 85,
+    "source": "Cowrie 默认伪装 banner（Debian 7 的旧 OpenSSH），现代主机极少使用"
+  },
+  {
+    "id": "opencanary-title",
+    "name": "OpenCanary",
+    "kind": "title",
+    "pattern": "(?i)opencanary",
+    "weight": 90,
+    "source": "OpenCanary 默认 HTTP 模块页面标题"
+  },
+  {
+    "id": "opencanary-body",
+    "name": "OpenCanary",
+    "kind": "banner",
+    "pattern": "(?i)opencanary|thinkst canary",
+    "weight": 80,
+    "source": "Thinkst OpenCanary 默认页面特征串"
+  },
+  {
+    "id": "kippo-title",
+    "name": "Kippo",
+    "kind": "title",
+    "pattern": "(?i)kippo",
+    "weight": 90,
+    "source": "Kippo（Cowrie 前身）默认特征"
+  },
+  {
+    "id": "glastopf-title",
+    "name": "Glastopf",
+    "kind": "title",
+    "pattern": "(?i)glastopf",
+    "weight": 90,
+    "source": "Glastopf Web 蜜罐默认标题"
+  },
+  {
+    "id": "glastopf-header",
+    "name": "Glastopf",
+    "kind": "header",
+    "pattern": "(?i)x-glastopf|glastopf",
+    "weight": 70,
+    "source": "Glastopf 默认响应头"
+  },
+  {
+    "id": "hfish-title",
+    "name": "HFish",
+    "kind": "title",
+    "pattern": "(?i)hfish|hfish蜜罐|海鱼",
+    "weight": 90,
+    "source": "HFish 蜜罐集群默认管理页标题"
+  },
+  {
+    "id": "hfish-path",
+    "name": "HFish",
+    "kind": "url",
+    "pattern": "/hfish|/HFish",
+    "weight": 60,
+    "source": "HFish 默认管理路径"
+  },
+  {
+    "id": "dionaea-title",
+    "name": "Dionaea",
+    "kind": "title",
+    "pattern": "(?i)dionaea",
+    "weight": 90,
+    "source": "Dionaea 默认特征"
+  },
+  {
+    "id": "dionaea-server",
+    "name": "Dionaea",
+    "kind": "server",
+    "pattern": "(?i)dionaea",
+    "weight": 80,
+    "source": "Dionaea 默认 Server 头"
+  },
+  {
+    "id": "elasticpot-title",
+    "name": "ElasticPot",
+    "kind": "title",
+    "pattern": "(?i)elasticpot|you know, for search",
+    "weight": 55,
+    "source": "ElasticPot（Elasticsearch 蜜罐）默认页；注意 \"you know, for search\" 是 ES 官方标语，权重压低避免误报"
+  },
+  {
+    "id": "honeytrap-server",
+    "name": "Honeytrap",
+    "kind": "server",
+    "pattern": "(?i)honeytrap",
+    "weight": 85,
+    "source": "Honeytrap 默认 Server 头"
+  },
+  {
+    "id": "snare-title",
+    "name": "SNARE/TANNER",
+    "kind": "title",
+    "pattern": "(?i)snare|tanner",
+    "weight": 75,
+    "source": "SNARE/TANNER Web 蜜罐默认特征"
+  },
+  {
+    "id": "cowrie-default-passwd",
+    "name": "Cowrie",
+    "kind": "banner",
+    "pattern": "root@svr04|root@ubuntu|nas01:~#",
+    "weight": 50,
+    "source": "Cowrie 默认伪 shell 提示符（常出现在抓到的会话回显里）"
+  },
+  {
+    "id": "common-honeypot-tech",
+    "name": "HoneypotFramework",
+    "kind": "technology",
+    "pattern": "(?i)cowrie|opencanary|glastopf|dionaea|hfish",
+    "weight": 70,
+    "source": "技术栈指纹里直接出现蜜罐框架名"
+  }
+]

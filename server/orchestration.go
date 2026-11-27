@@ -55,6 +55,10 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	// 受管执行入口：外部工具唯一合法的调用通道。绑定在 tools 表里
 	// （worker/pentest），ToolResolve 按绑定过滤。
 	tools = append(tools, []actool.CoreTool{s.toolRunTool()}...)
+	// 流量重放：把"已录流量"变成可改参数重来的武器（而不只是只读证据）。
+	// 必须在 hostTools 与 seedOrchestrationTools 两处都登记：少了后者，
+	// ToolResolve 会因为它没有 tools 表绑定而把它丢掉（见 assembly.go ToolResolve）。
+	tools = append(tools, s.httpReplayTool())
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)
@@ -744,6 +748,13 @@ func (s *Server) seedOrchestrationTools() {
 	for _, t := range s.platformTools() {
 		schema, _ := json.Marshal(t.InputSchema())
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, autoAgents)
+	}
+	// http_replay 默认绑 worker：它是 worker 验证漏洞的手段（越权重放、注入复测）。
+	// 首次插入生效；老库若已存在该行，绑定不会被改写（需要时由下面的 rebind 补）。
+	{
+		rt := s.httpReplayTool()
+		schema, _ := json.Marshal(rt.InputSchema())
+		_ = s.m.PG().SeedTool(rt.Name(), rt.Description(), schema, json.RawMessage(`["worker"]`))
 	}
 	s.refreshBuiltinToolSchemas()
 	s.seedAutoDefaultBindings()

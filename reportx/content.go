@@ -101,6 +101,11 @@ type vulnDetail struct {
 	RiskAnalysis []string          `json:"risk_analysis"`
 	Remediation  []string          `json:"remediation"`
 	FixStatus    string            `json:"fix_status"`
+	// Retest* 是复测结论（finding_retests 最新 completed 记录）。三者为空即未复测，
+	// 渲染层必须整段跳过，不能输出空标题。
+	RetestVerdict string `json:"retest_verdict,omitempty"`
+	RetestSummary string `json:"retest_summary,omitempty"`
+	RetestAt      string `json:"retest_at,omitempty"`
 }
 
 type procBlock struct {

@@ -287,7 +287,7 @@ func workerTrafficBlock(recording bool) string {
 	if !recording {
 		return ""
 	}
-	return "\n\n**流量工具**：\n- traffic_search / traffic_get / traffic_blob：回看响应、找已访问过的资源，**先查流量、不要重复 curl 同一 URL**。traffic_search **必须指定 host**、默认只回 3 条极轻量索引(id/method/url/status/resp_len，无响应内容)，需要更多显式调大 limit；可用 body_contains 在请求/响应正文里做全文搜索(至少 3 字符，支持子串和中文，如找密码/密钥/报错/内网地址)；要看某条原文用 traffic_get(id)，其中超大正文显示为 @blob sha256:<hash>，用 traffic_blob(hash) 分段取全文。"
+	return "\n\n**流量工具**：\n- **http_replay**：从已录流量取一条请求，**改参数/换身份后重发**（覆盖 method/url/headers/body，可 remove_headers 删掉原 Authorization 看是否仍放行）。验证越权、注入复测、方法绕过时优先用它，而不是手搓 curl —— 手搓会丢掉原始头/Cookie/签名参数，重放出来的不是同一条请求，且绕过平台范围校验。默认经录制代理发送，重放本身会变成一条新流量可作为证据；目标必须在授权范围内。\n- traffic_search / traffic_get / traffic_blob：回看响应、找已访问过的资源，**先查流量、不要重复 curl 同一 URL**。traffic_search **必须指定 host**、默认只回 3 条极轻量索引(id/method/url/status/resp_len，无响应内容)，需要更多显式调大 limit；可用 body_contains 在请求/响应正文里做全文搜索(至少 3 字符，支持子串和中文，如找密码/密钥/报错/内网地址)；要看某条原文用 traffic_get(id)，其中超大正文显示为 @blob sha256:<hash>，用 traffic_blob(hash) 分段取全文。"
 }
 
 // artifactSpec is 段 [C]: the code-owned, non-editable tail appended to every

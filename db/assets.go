@@ -17,6 +17,8 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"artex/honeypot"
 )
 
 // =====================================================================
@@ -762,17 +764,27 @@ func (s *AssetStore) UpsertHTTPService(req UpsertHTTPServiceReq) (int64, error) 
 		faviconVal = req.FaviconMMH3
 	}
 
+	// 蜜罐静态签名匹配：在落库时一次性算好，后续所有读取（列表/概览/报告）
+	// 都不必再跑正则。判据只取本条 upsert 已有的字段，不额外发包探测。
+	hp := honeypot.Classify(honeypot.Asset{
+		URL:          normURL,
+		Host:         domain,
+		PageTitle:    req.PageTitle,
+		Technologies: req.Technologies,
+	})
+	hpEvidence, _ := json.Marshal(hp)
+
 	var id int64
 	err = s.tx.QueryRow(`
 INSERT INTO assets(
     type, url, service_type, service_name, domain, ip, port, root_domain,
     c_segment, favicon_mmh3, technologies, status_code, content_length, page_title,
-    auth, company_id, company_source, task_ids
+    auth, company_id, company_source, task_ids, honeypot_score, honeypot_evidence
 )
 VALUES (
     'service', $1, 'http', $2, $3, $4, $5, $6,
     $7::cidr, $8, $9::text[], $10, $11, $12,
-    $13::jsonb[], $14, 'scope', $15::bigint[]
+    $13::jsonb[], $14, 'scope', $15::bigint[], $16, $17::jsonb
 )
 ON CONFLICT (url) WHERE type = 'service' AND service_type = 'http' DO UPDATE SET
     status_code    = COALESCE(EXCLUDED.status_code,    assets.status_code),
@@ -798,11 +810,16 @@ ON CONFLICT (url) WHERE type = 'service' AND service_type = 'http' DO UPDATE SET
         WHEN EXCLUDED.company_id IS NOT NULL THEN 'scope'
         ELSE assets.company_source
     END,
+    honeypot_score = GREATEST(assets.honeypot_score, EXCLUDED.honeypot_score),
+    honeypot_evidence = CASE
+        WHEN EXCLUDED.honeypot_score > assets.honeypot_score THEN EXCLUDED.honeypot_evidence
+        ELSE assets.honeypot_evidence
+    END,
     last_seen      = now()
 RETURNING id`,
 		normURL, serviceName, domainVal, ipVal, nullableInt(port), rootDomain,
 		csegVal, faviconVal, techsArr, req.StatusCode, req.ContentLength, titleVal,
-		authJSON, companyID, taskIDs,
+		authJSON, companyID, taskIDs, hp.Score, string(hpEvidence),
 	).Scan(&id)
 	if err != nil {
 		return 0, err
@@ -1758,4 +1775,48 @@ func scanAssets(rows *sql.Rows) ([]*Asset, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// HoneypotSuspects 返回某任务范围内被静态签名判为「疑似蜜罐」的资产。
+//
+// 只取 score >= 80（即"≥2 条独立签名"或"单条强指纹"），与 honeypot.Classify
+// 的 suspected 档一致 —— 太低的分档塞进 planner 上下文只会变成噪声，
+// 而 planner 每轮都读概览，噪声会稀释真正该回避的目标。
+func (s *AssetStore) HoneypotSuspects(taskID int64, limit int) ([]HoneypotAsset, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Query(`SELECT id, COALESCE(url,''), COALESCE(domain,''), COALESCE(page_title,''),
+       honeypot_score, honeypot_evidence
+FROM assets
+WHERE honeypot_score >= 80 AND $1 = ANY(task_ids)
+ORDER BY honeypot_score DESC, id ASC
+LIMIT $2`, taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HoneypotAsset{}
+	for rows.Next() {
+		var a HoneypotAsset
+		var ev []byte
+		if err := rows.Scan(&a.ID, &a.URL, &a.Domain, &a.PageTitle, &a.Score, &ev); err != nil {
+			return nil, err
+		}
+		if len(ev) > 0 {
+			a.Evidence = string(ev)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// HoneypotAsset 是透出给 planner 的最小蜜罐资产视图。
+type HoneypotAsset struct {
+	ID       int64   `json:"id"`
+	URL      string  `json:"url,omitempty"`
+	Domain   string  `json:"domain,omitempty"`
+	PageTitle string `json:"page_title,omitempty"`
+	Score    float64 `json:"score"`
+	Evidence string  `json:"evidence,omitempty"`
 }

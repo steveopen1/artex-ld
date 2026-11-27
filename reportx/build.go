@@ -71,8 +71,16 @@ type FindingInput struct {
 	// the AI is told to skip reconstructing it (saves tokens + can't fabricate). Empty =
 	// fall back to AI-reconstructed test_process / PoC.
 	Reproduction json.RawMessage
-	CreatedAt    time.Time
-	Enrichment   *Enrichment // pre-loaded persisted enrichment; when set the AI call is skipped
+	// RetestVerdict / RetestSummary / RetestAt 来自 finding_retests 表最新一条 completed 记录。
+	// Verdict 取值 reproduced（仍可复现）/ fixed（已修复）/ inconclusive（无法判定）。
+	// 为什么必须进报告：复测是实打实跑了一遍请求才得出的结论，但过去只写回
+	// findings.status，报告侧完全不读 —— 等于复测白跑，而报告里的"修复情况"
+	// 永远硬编码"待修复"，客户拿着报告看不出已经修了。
+	RetestVerdict string
+	RetestSummary string
+	RetestAt      time.Time
+	CreatedAt     time.Time
+	Enrichment    *Enrichment // pre-loaded persisted enrichment; when set the AI call is skipped
 }
 
 // Reproduction is the structured 复现过程 captured in-situ by the agent (mirrors the
@@ -230,6 +238,33 @@ func BuildDoc(ctx context.Context, pg *db.DB, in *GenInput) *reportDoc {
 	return doc
 }
 
+// fixStatusFromRetest 决定报告"修复情况"一栏的文案：有复测结论就用结论，
+// 没有才回落到"待修复"。这样"已复测关闭"的条目不会在报告里继续写着待修复。
+func fixStatusFromRetest(loc string, f FindingInput) string {
+	switch f.RetestVerdict {
+	case "fixed":
+		return statusFixed(loc)
+	case "reproduced":
+		return statusStillReproducible(loc)
+	case "inconclusive":
+		return statusInconclusive(loc)
+	}
+	return statusPending(loc)
+}
+
+// verdictName 把机器取值翻成可读文案；未知/空值返回空串（模板据此不渲染该栏）。
+func verdictName(loc, verdict string) string {
+	switch verdict {
+	case "fixed":
+		return statusFixed(loc)
+	case "reproduced":
+		return statusStillReproducible(loc)
+	case "inconclusive":
+		return statusInconclusive(loc)
+	}
+	return ""
+}
+
 func assembleVuln(loc string, f FindingInput, enr Enrichment, secNo, dataDir string, evByStep map[int][]procBlock) vulnDetail {
 	// Vuln NAME: AI-polished title → vulnclass (already a name, e.g. "SSL POODLE
 	// (CVE-2014-3566)") → cleaned summary as last resort. Summary is the long
@@ -239,7 +274,15 @@ func assembleVuln(loc string, f FindingInput, enr Enrichment, secNo, dataDir str
 	d := vulnDetail{
 		SecNo: secNo, Title: title,
 		Severity: severityName(loc, f.Severity), Target: target, URL: target,
-		FoundDate: f.CreatedAt.Format("2006-01-02"), FixStatus: statusPending(loc),
+		FoundDate: f.CreatedAt.Format("2006-01-02"), FixStatus: fixStatusFromRetest(loc, f),
+		RetestVerdict: verdictName(loc, f.RetestVerdict),
+	}
+	// 复测详情：只在真跑过复测且拿到结论时才写，避免给每条漏洞都留一行空话。
+	if strings.TrimSpace(f.RetestSummary) != "" {
+		d.RetestSummary = f.RetestSummary
+	}
+	if !f.RetestAt.IsZero() {
+		d.RetestAt = f.RetestAt.Format("2006-01-02")
 	}
 	if len(enr.Description) > 0 {
 		d.Description = enr.Description

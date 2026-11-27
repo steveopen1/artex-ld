@@ -1527,6 +1527,19 @@ export interface AssetInterceptRule {
   updated_at: string;
 }
 
+/** 按拦截规则聚合的命中统计（GET /api/intercept/history/stats）。
+ *  rule_id=0 表示规则已删除或人工直决。 */
+export interface InterceptRuleStat {
+  rule_id: number;
+  rule_name: string;
+  total: number;
+  denied: number;
+  allowed: number;
+  pending: number;
+  timedout: number;
+  last_at: string;
+}
+
 export interface InterceptPending {
   decision_source?: "rule" | "model" | "manual" | "unknown" | "";
   id: number;

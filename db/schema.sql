@@ -1276,6 +1276,24 @@ ALTER TABLE findings ADD COLUMN IF NOT EXISTS report_conversation_id BIGINT REFE
 CREATE INDEX IF NOT EXISTS idx_findings_task ON findings(task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_findings_time ON findings(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status, created_at DESC);
+-- ═══ 写入层去重（去重四层的第 1-2 层）═══
+-- dedup_key: sha256(vulnclass | 排序后的资产 id | 归一化目标)。空串 = 无法判定
+--   （没有资产也没有可用目标），此时不参与去重 —— 宁可漏判，不可把不同漏洞并掉。
+-- duplicate_of: 命重时指向先落库的那条；status 同时置 'duplicate'。
+--   之所以"写入但标记"而不是"拒绝写入"：判定是启发式的，误判时数据还在，
+--   人工把 status 改回来即可，不会丢漏洞。
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS dedup_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS duplicate_of BIGINT REFERENCES findings(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_findings_dedup ON findings(task_id, dedup_key) WHERE dedup_key <> '';
+-- ═══ 蜜罐置信度（静态签名匹配，资产落库时计算）═══
+-- honeypot_score: 0-100。命中权重之和（封顶 100）。0 = 无公开指纹命中。
+-- honeypot_evidence: 命中的签名明细（框架名/字段/来源），供人工复核。
+-- 注意：score=0 **不等于**不是蜜罐 —— 只代表没有公开指纹；定制蜜罐不会有。
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS honeypot_score REAL NOT NULL DEFAULT 0;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS honeypot_evidence JSONB NOT NULL DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS idx_assets_honeypot ON assets(honeypot_score) WHERE honeypot_score > 0;
+
+
 -- 「按资产」视图靠 asset_ids @> '[<id>]' 反查发现,没有这个 GIN 索引就是全表扫。
 CREATE INDEX IF NOT EXISTS idx_findings_asset_ids ON findings USING GIN(asset_ids jsonb_path_ops);
 

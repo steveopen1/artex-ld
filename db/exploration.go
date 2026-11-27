@@ -881,6 +881,20 @@ WHERE exploration_id=$1 AND kind='intent' AND state IN ('done','blocked','exhaus
 	return n, err
 }
 
+// CountStoppedIntents counts intents that were killed or deleted (state='stopped').
+//
+// 为什么单列一个函数而不并进 CountFinishedIntents：那个函数的语义被 graph_overview 的
+// done_intents_total 与提示词共用，口径是"探索到终态的意图"，改它会静默改变 planner
+// 对"派过没有"的判断。而被 kill 的意图是另一类事实——它是**人为止损动作**的结果，
+// 恰恰是复盘时最该被看见的一类，之前却从所有汇总里消失了（overview 只收
+// done/blocked/exhausted）。这里只做计数，不改变既有统计口径。
+func (s *ExplorationStore) CountStoppedIntents() (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM exploration_nodes
+WHERE exploration_id=$1 AND kind='intent' AND state='stopped'`, s.expID).Scan(&n)
+	return n, err
+}
+
 // CountOpenIntents counts this exploration's open intents — graph_overview's
 // frontier_open, so the planner knows open_intents (capped at the top-N by
 // priority) is a truncated view and there may be more claimable work.
@@ -1243,14 +1257,27 @@ func (s *ExplorationStore) FindingIntentsTerminal() (map[int64]int64, error) {
 	return out, rows.Err()
 }
 
-// Frontier returns open intents ordered by priority desc then id (FIFO tiebreak).
+// Frontier returns open intents ordered by **有效优先级**（priority + 年龄加成），
+// 同分再按 id 升序（FIFO 兜底）。
+//
+// 为什么不是单纯的 `priority DESC, id ASC`：那是严格优先级队列，只要高优先级意图
+// 持续被注入，低优先级意图就永远排不到队首——planner 每轮都会派生新意图，所以
+// "持续注入"是常态而不是边界情况。实测语义上表现为：一个 priority=2 的意图可以
+// 在整个任务生命周期内一次都没被 worker 领到。
+//
+// 加成规则：每等 10 分钟 +1，封顶 +12（略高于最大优先级 9）。
+//   - 前 10 分钟完全按原优先级，不改变短期调度手感；
+//   - 封顶取 12 而非 9 是为了让"等了 2 小时的老意图"能压过"刚注入的 priority=9"，
+//     即饥饿一定会在有限时间内被打破，而不是与原优先级打平；
+//   - GREATEST(...,0) 兜住 created_at 落在未来的时钟回拨情况，避免负加成。
 func (s *ExplorationStore) Frontier(limit int) ([]*Node, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
 WHERE exploration_id=$1 AND kind='intent' AND state='open'
-ORDER BY priority DESC, id ASC LIMIT $2`, s.expID, limit)
+ORDER BY (priority + LEAST(GREATEST(FLOOR(EXTRACT(EPOCH FROM (now() - created_at)) / 600)::int, 0), 12)) DESC, id ASC
+LIMIT $2`, s.expID, limit)
 	if err != nil {
 		return nil, err
 	}

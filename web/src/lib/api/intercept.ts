@@ -17,6 +17,7 @@ import type {
   InterceptApprovalFilter,
   InterceptApprovalRow,
   InterceptDetail,
+  InterceptRuleStat,
   InterceptPending,
   InterceptRule,
   JudgeConfig,
@@ -55,6 +56,12 @@ export const interceptApi = {
     ),
   interceptDetail: (id: number) => get<InterceptDetail>(`/intercept/history/${id}`),
   interceptHistory: () => get<{ items: InterceptApprovalRow[] }>("/intercept/history").then((r) => arr(r.items)),
+  // 按规则聚合的命中数：与列表共用同一套筛选（q/from/to/status/decision_source），
+  // 保证"筛完看到的条目"与"统计出来的数"口径一致。
+  interceptHistoryStats: (filter: InterceptApprovalFilter = {}) =>
+    get<{ rules: InterceptRuleStat[] }>(`/intercept/history/stats?${interceptPageQuery(1, 1, filter)}`).then(
+      (r) => arr(r.rules),
+    ),
   interceptHistoryPage: (page = 1, size = 20, filter: InterceptApprovalFilter = {}) =>
     get<{ items: InterceptApprovalRow[]; total?: number }>(
       `/intercept/history?${interceptPageQuery(page, size, filter)}`,

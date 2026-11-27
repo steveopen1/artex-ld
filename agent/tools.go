@@ -20,7 +20,21 @@ import (
 	actool "norma/tool"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// oldestAgeMinutes 返回一批意图里最老的那条已等待多少分钟（无输入或全为将来时间时返回 0）。
+// 供 graph_overview 的 oldest_open_age_minutes 使用 —— 该值必须独立于被截断的
+// open_intents 计算，否则最老的意图（低优先级、被挤出前 N）反而算不到。
+func oldestAgeMinutes(ns []*db.Node) int {
+	oldest := 0
+	for _, n := range ns {
+		if age := int(time.Since(n.CreatedAt).Minutes()); age > oldest {
+			oldest = age
+		}
+	}
+	return oldest
+}
 
 // compactIntents distills intents to {id, summary, state, asset_ids, parents,
 // yields} so the planner sees both the direction and its LINEAGE — parents (the
@@ -33,6 +47,15 @@ func compactIntents(ns []*db.Node, parentsOf, yieldsOf map[int64][]int64) []map[
 		var p map[string]any
 		_ = json.Unmarshal(n.Payload, &p)
 		m := map[string]any{"id": n.ID, "summary": p["summary"], "state": n.State}
+		// age_minutes：本意图进 frontier 后已等待多久（分钟）。
+		// 为什么要透出：Frontier 现在带年龄加成（等 10 分钟 +1 有效优先级，见
+		// db/exploration.go Frontier 注释），但加成是隐式的——planner 若看不到年龄，
+		// 就无法理解"为什么这条低优先级意图先被派了"，也无法主动判断
+		// "某方向派了却一直没被领 = 应该提高优先级或换写法"。只给 0 以上的值，
+		// 刚建的意图不带该键，避免每条都多一个噪声字段。
+		if age := int(time.Since(n.CreatedAt).Minutes()); age > 0 {
+			m["age_minutes"] = age
+		}
 		if n.Inherited {
 			m["source_task_id"] = n.SourceTaskID
 			m["inherited"] = true
@@ -583,6 +606,29 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		out["frontier_open"] = fo
 	} else {
 		out["frontier_open"] = len(fr)
+	}
+	// honeypot_suspects：疑似蜜罐资产（静态签名 ≥2 条或单条强指纹）。
+	// 为什么要进概览：蜜罐是**预算黑洞**——把字典和 exploit 砸在诱捕目标上，
+	// 拿到的是假 shell，而 planner 从"探索有进展"的表象上完全看不出来。
+	// 只给 suspected 档（score>=80），弱信号不进（否则每轮概览全是噪声）。
+	if t.as != nil && t.taskID > 0 {
+		if hs, err := t.as.HoneypotSuspects(t.taskID, 5); err == nil && len(hs) > 0 {
+			out["honeypot_suspects"] = hs
+		}
+	}
+	// stopped_intents_total：被 kill/删除的意图数。
+	// 之前这类止损动作在概览里完全不可见（done_intents_total 只收 done/blocked/exhausted），
+	// 于是"我让它别打了"和"它压根没派过"在 planner 眼里长得一样。单列一档之后，
+	// planner 能区分"这个方向被主动终止过 N 次"与"这个方向没有记录"。
+	if st, err := t.ts.CountStoppedIntents(); err == nil && st > 0 {
+		out["stopped_intents_total"] = st
+	}
+	// oldest_open_age_minutes：最老的那条开放意图已经等了多久。
+	// 单独给一个标量而不是让 planner 从 open_intents 里算——fr 被截断到前 30 条，
+	// 而最老的意图恰恰可能在截断之外（低优先级 + 已老化）。这是"是否有方向在挨饿"
+	// 的直接指标。
+	if oldest := oldestAgeMinutes(fr); oldest > 0 {
+		out["oldest_open_age_minutes"] = oldest
 	}
 	// findings (confirmed vulns) and facts (worker exploration results) are
 	// now distinct node kinds. recent_facts surfaces fact summaries (esp.
@@ -1736,7 +1782,17 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			*db.RecordedFinding
 			EvidenceStatus string `json:"evidence_status"`
 			EvidenceNote   string `json:"evidence_note,omitempty"`
+			DedupStatus    string `json:"dedup_status,omitempty"`
+			DedupNote      string `json:"dedup_note,omitempty"`
 		}{RecordedFinding: recorded, EvidenceStatus: "bound"}
+		// 写入层去重命中：如实告诉 agent "这条被标成重复了、指向哪一条"。
+		// 不说的话，agent 会以为这是一条新漏洞继续围绕它派活；说清楚之后，
+		// 它可以转而补充已有那条的证据，而不是重复上报。
+		if recorded.DuplicateOf > 0 {
+			result.DedupStatus = "duplicate"
+			result.DedupNote = fmt.Sprintf(
+				"本条与已有漏洞重复（duplicate_of=%d：同任务、同漏洞类别、同资产、同端点）。已照常保存但标记为 duplicate，报告默认不计入。请勿再重复上报同一问题；如需补充，请把新证据挂到已有那条上。", recorded.DuplicateOf)
+		}
 		if len(recorded.Traffic.Bindings) == 0 {
 			result.EvidenceStatus = "not_bound"
 			result.EvidenceNote = "漏洞已保存，未绑定流量。TCP/无包情形可正常继续；若已有核实的 HTTP 流量，请用可用的 bind_finding_traffic 或漏洞页面补绑，再完成证据交接。不要重复创建漏洞。"

@@ -417,6 +417,10 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const running = intents.filter((i) => i.state === "running");
   const open = intents.filter((i) => i.state === "open");
   const blocked = intents.filter((i) => i.state === "blocked");
+  // 被终止的意图（kill/删除）。之前这一档在概览里完全不可见 ——
+  // done/blocked/exhausted 之外的状态都被忽略，于是"我主动让它停"和
+  // "它压根没派过"看起来一样，止损动作无法复盘。
+  const stopped = intents.filter((i) => i.state === "stopped");
   const taskFindings = findings.filter((f) => f.task_id === taskId);
   const goalsPct = task?.goals_total ? Math.round(((task.goals_met ?? 0) / task.goals_total) * 100) : 0;
   // token 合计（跨全部模型），用于卡片头部总览。
@@ -1022,6 +1026,10 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             <div>
               <div className="text-2xl font-semibold tabular-nums text-red-600">{blocked.length}</div>
               <div className="text-xs text-muted-foreground">被拦意图</div>
+            </div>
+            <div>
+              <div className="text-2xl font-semibold tabular-nums text-muted-foreground">{stopped.length}</div>
+              <div className="text-xs text-muted-foreground">已终止</div>
             </div>
           </CardContent>
         </Card>

@@ -423,6 +423,31 @@ func (s *Server) interceptHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
 }
 
+// interceptHistoryStats 按规则聚合拦截命中数（GET /api/intercept/history/stats）。
+// 与列表接口共用 interceptFilterParams，保证"筛出来的列表"与"聚合统计"口径一致。
+// 单独一个端点而不是塞进列表响应：聚合要扫全量，列表只取一页，混在一起会让
+// 每次翻页都多一次全表聚合。
+func (s *Server) interceptHistoryStats(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	filter, err := interceptFilterParams(r.URL.Query())
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	stats, err := pg.InterceptCountsByRule(filter)
+	if err != nil {
+		writeErrRedacted(w, 500, err.Error())
+		return
+	}
+	if stats == nil {
+		stats = []db.InterceptRuleStat{}
+	}
+	writeJSON(w, 200, map[string]any{"rules": stats})
+}
+
 func interceptFilterParams(q url.Values) (db.InterceptApprovalFilter, error) {
 	filter := db.InterceptApprovalFilter{
 		Status:         q.Get("status"),

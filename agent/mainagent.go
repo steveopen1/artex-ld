@@ -15,6 +15,7 @@ import (
 	"norma/agentcore"
 	"norma/llm"
 	"norma/permission"
+	"norma/hook"
 	actool "norma/tool"
 	"norma/transcript"
 )
@@ -39,6 +40,9 @@ type MainAgent struct {
 	proxyCACert    string                                 // recording proxy's CA cert path (HTTPS verify)
 	webSearch      WebSearchOpts                          // web_search tool backend selection (off by default)
 	workDir        string                                 // shared work dir (surfaced in prompt as artifact-output target)
+	// hooksFn 返回该任务的 Guard 钩子注册表。主 agent 也能跑 Bash，之前完全没挂
+	// hooks —— 拦截规则与范围校验都绕过，必须一并接上。
+	hooksFn func() *hook.Registry
 	steerWork      func(intentID int64, msg string) error // engine callback: steer a running work (nil = off)
 	nonStreamingFn func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn   func() bool                            // resolver: use experimental noa compaction? (nil = off)
@@ -116,6 +120,9 @@ func mainAgentSystem(goal, dataDir, workDir string) string {
 	return body + artifactSpec(workDir)
 }
 
+// SetHooks wires the task's Guard hook registry into the main-agent session.
+func (m *MainAgent) SetHooks(fn func() *hook.Registry) { m.hooksFn = fn }
+
 // Chat handles one human message and returns the assistant reply. emit, if
 // non-nil, receives each execution step (thinking / tool_use / tool_result /
 // text / result) so the main-agent session shows its work — exactly like the
@@ -180,6 +187,9 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		Settlement:   wrapupSettlement("mainagent", nil),
 		NonStreaming: m.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
 		MaxTokens:    m.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
+	}
+	if m.hooksFn != nil {
+		opts.Hooks = m.hooksFn()
 	}
 	if m.tx != nil { // persist raw human↔AI conversation; one accumulating file per segment
 		opts.Transcript = m.tx

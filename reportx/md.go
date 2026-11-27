@@ -110,6 +110,18 @@ func BuildMarkdown(ctx context.Context, pg *db.DB, in *GenInput) (string, map[st
 			// 7. 修复情况
 			b.WriteString("**7. " + s7 + "**\n\n")
 			b.WriteString(v.FixStatus + "\n\n")
+			// 复测结论：仅在有结论时输出。summary 是实跑复测得到的判定依据，
+			// 与"修复情况"分开两段，避免把机器判定的证据混进状态一句话里。
+			if v.RetestSummary != "" || v.RetestAt != "" {
+				b.WriteString("**" + L("复测结论", "複測結論", "Retest Result") + "**\n\n")
+				if v.RetestSummary != "" {
+					b.WriteString(v.RetestSummary + "\n")
+				}
+				if v.RetestAt != "" {
+					b.WriteString("\n" + L("复测时间：", "複測時間：", "Retested at: ") + v.RetestAt + "\n")
+				}
+				b.WriteString("\n")
+			}
 			b.WriteString("---\n\n")
 		}
 	}

@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/net/proxy"
+
+	"artex/proxyauth"
 )
 
 // dynamicForwardProxy is a credential-free, stable local proxy. Each request
@@ -29,6 +32,13 @@ type dynamicForwardProxy struct {
 	conns   map[net.Conn]struct{}
 	ctx     context.Context
 	cancel  context.CancelFunc
+	// secret 用于签发/校验任务代理凭证（见 proxyauth 包）。
+	// 进程级随机生成：代理地址本身也是启动时才知道的，不需要持久化。
+	secret []byte
+	// gate 是任务级范围闸门：给定任务与目标主机，返回非空字符串表示拒绝原因。
+	// nil = 不做判定（未配置）。由 Server 注入 —— 代理是 Manager 级单例，
+	// 拿不到 Server 的方法集，只能靠回调。
+	gate func(taskID int64, host string) (string, bool)
 }
 
 func newDynamicForwardProxy(current func() string) (*dynamicForwardProxy, error) {
@@ -37,7 +47,13 @@ func newDynamicForwardProxy(current func() string) (*dynamicForwardProxy, error)
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &dynamicForwardProxy{ln: ln, addr: "http://" + ln.Addr().String(), current: current, direct: func() bool { return true }, conns: map[net.Conn]struct{}{}, ctx: ctx, cancel: cancel}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		cancel()
+		_ = ln.Close()
+		return nil, err
+	}
+	p := &dynamicForwardProxy{ln: ln, addr: "http://" + ln.Addr().String(), current: current, direct: func() bool { return true }, conns: map[net.Conn]struct{}{}, ctx: ctx, cancel: cancel, secret: secret}
 	p.server = &http.Server{Handler: http.HandlerFunc(p.serveHTTP), BaseContext: func(net.Listener) context.Context { return ctx }}
 	go p.server.Serve(ln)
 	return p, nil
@@ -78,6 +94,51 @@ func (p *dynamicForwardProxy) track(c net.Conn) func() {
 	return func() { p.mu.Lock(); delete(p.conns, c); p.mu.Unlock() }
 }
 
+// URLForTask 返回带任务凭证的代理地址，供该任务的 agent 通过 HTTP_PROXY 使用。
+// 无凭证的流量仍然放行（UI/自动化/未归属场景），但只有带合法凭证的流量才会
+// 被按任务范围判定 —— 见 checkScope 的注释说明这个边界。
+func (p *dynamicForwardProxy) URLForTask(taskID int64) string {
+	if p == nil {
+		return ""
+	}
+	if taskID <= 0 {
+		return p.addr
+	}
+	u, err := url.Parse(p.addr)
+	if err != nil {
+		return p.addr
+	}
+	user, pass := proxyauth.UserAndPass(p.secret, taskID)
+	u.User = url.UserPassword(user, pass)
+	return u.String()
+}
+
+// checkScope 解出任务凭证并按该任务范围判定目标主机。
+//
+// 返回值 (原因, 是否拒绝)。
+//
+// 边界说明（重要）：凭证缺失时**放行**。原因是同一个代理还被 UI 的请求重发、
+// 未绑定任务的对话等复用，把这些一律拒掉会直接打断正常功能。代价是：一个
+// 刻意在 Bash 里 unset HTTP_PROXY 的 agent 能绕过这一层 —— 但那样它也就失去了
+// 代理（录制、出口池）能力，且文本层的 Guard 仍然会拦它的命令行。两层都不完美，
+// 叠加才把"随手 curl 打到范围外"这条最常见的路径堵死。
+func (p *dynamicForwardProxy) checkScope(r *http.Request, host string) (string, bool) {
+	if p == nil || p.gate == nil || host == "" {
+		return "", false
+	}
+	taskID, token, ok := proxyauth.Parse(r.Header.Get("Proxy-Authorization"))
+	if !ok {
+		return "", false // 无归属流量：放行（见方法注释的边界说明）
+	}
+	if !proxyauth.Verify(p.secret, taskID, token) {
+		return "代理凭证无效", true
+	}
+	if reason, blocked := p.gate(taskID, host); blocked {
+		return reason, true
+	}
+	return "", false
+}
+
 func (p *dynamicForwardProxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodConnect {
 		p.serveConnect(w, r)
@@ -116,11 +177,11 @@ func (p *dynamicForwardProxy) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		rr.URL.Host = r.Host
 	}
 	rr.RequestURI = ""
-	for k := range rr.Header {
-		if strings.EqualFold(k, "Proxy-Authorization") {
-			rr.Header.Del(k)
-		}
+	if reason, blocked := p.checkScope(r, rr.URL.Hostname()); blocked {
+		http.Error(w, reason, http.StatusForbidden)
+		return
 	}
+	proxyauth.StripHeader(rr.Header)
 	resp, err := tr.RoundTrip(rr)
 	if err != nil {
 		http.Error(w, "代理不可用", 502)
@@ -137,6 +198,16 @@ func (p *dynamicForwardProxy) serveHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 func (p *dynamicForwardProxy) serveConnect(w http.ResponseWriter, r *http.Request) {
+	// CONNECT 是最关键的一条：HTTPS 流量全部走隧道，隧道一旦建立，代理就再也
+	// 看不到里面访问了什么，所以必须在这里按 r.Host 判定。
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if reason, blocked := p.checkScope(r, host); blocked {
+		http.Error(w, reason, http.StatusForbidden)
+		return
+	}
 	up := strings.TrimSpace(p.current())
 	if up == "" && p.direct != nil && !p.direct() {
 		http.Error(w, "代理不可用", 502)

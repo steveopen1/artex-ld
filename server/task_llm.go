@@ -24,6 +24,7 @@ import (
 	"artex/agent"
 	"artex/db"
 	"artex/llmrec"
+	"norma/hook"
 	"norma/llm"
 	"norma/transcript"
 )
@@ -587,6 +588,11 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	if bundle := s.taskAgents[t.ID]; bundle != nil {
 		return bundle
 	}
+	taskID64, _ := strconv.ParseInt(t.ID, 10, 64)
+	// 每个任务拿到带自己凭证的代理地址（见 proxyauth）：代理据此把流量归属到任务，
+	// 并按该任务授权范围拒绝越界目标。走录制 MITM 或直连出口时此函数原样返回
+	// 普通地址，不影响原有行为。
+	proxy := s.m.ProxyAddrForTask(taskID64)
 	goalRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "goals"}
 	plannerRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "planner"}
 	workerRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "worker"}
@@ -602,7 +608,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk.SetMaxTokens(workerRuntime.maxTokens)       // 同上,输出上限也跟随当前激活 profile
 	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)     // 实验功能:noa 上下文压缩(平台级开关,每 run 读)
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
-	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	wk.SetProxy(proxy, s.m.ProxyCACert())
 	wk.SetProxyProvider(s.m.ProxyAddr)
 	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInject(s.constraintInjectWorker) // 操作约束注入 worker(可配置,默认开)
@@ -621,7 +627,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl.SetReviewEnabled(func(int64) bool { return t.ReviewEnabled })
 	pl.SetExecutorChecker(s.checkExecutorKey)
 	pl.SetExecutorCatalog(s.executorCatalog)
-	pl.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	pl.SetProxy(proxy, s.m.ProxyCACert())
 	pl.SetProxyProvider(s.m.ProxyAddr)
 	pl.SetWebSearch(s.webSearchFor("planner"))
 	pl.SetConstraintInject(s.constraintInjectPlanner)                          // 操作约束注入 planner(可配置,默认开)
@@ -633,6 +639,15 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	// 平台的拦截/审批计数回流 planner：guard 里早就按工具累计 deny/ask/WAF 命中，
 	// 但从来没人读，planner 因此看不到"这条方向一直被打回"，每轮重复派同样的意图。
 	pl.SetGuardStats(guardStatsResolver(t))
+	// planner / mainagent 也会跑 Bash。之前两者完全没挂 hooks —— 拦截规则与
+	// 任务范围校验都绕过，等于比 worker 更宽的旁路。这里接同一份 Guard 注册表。
+	// 用闭包包一层是因为 t.Guard 可能在任务重建后替换，每次 run 现取。
+	pl.SetHooks(func() *hook.Registry {
+		if t.Guard == nil {
+			return nil
+		}
+		return t.Guard.Hooks()
+	})
 	main := agent.NewMainAgent(mainRuntime, "task-router", s.m.dir, tx, mainRuntime.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	main.SetFindingRecorder(s.evidenceStore())
 	main.SetTrafficResolver(s.resolveFindingTraffic)
@@ -640,10 +655,16 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	main.SetNonStreaming(mainRuntime.nonStreaming)
 	main.SetMaxTokens(mainRuntime.maxTokens)
 	main.SetNoaEnabled(s.m.NoaCompactionEnabled) // 实验功能:noa 上下文压缩(平台级开关,每 run 读)
-	main.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	main.SetProxy(proxy, s.m.ProxyCACert())
 	main.SetProxyProvider(s.m.ProxyAddr)
 	main.SetWebSearch(s.webSearchFor("mainagent"))
 	main.SetSteerWork(s.engine.SteerWork) // steer_work：人对运行中 work 实时纠偏
+	main.SetHooks(func() *hook.Registry {
+		if t.Guard == nil {
+			return nil
+		}
+		return t.Guard.Hooks()
+	})
 	bundle := &taskAgentBundle{
 		runtime: goalRuntime, plannerRuntime: plannerRuntime, workerRuntime: workerRuntime,
 		mainRuntime: mainRuntime, pl: pl, wk: wk, main: main, pinnedWorkers: map[int64]*agent.Worker{},
@@ -678,6 +699,8 @@ func (s *Server) workerForTaskSlot(t *Task, slot WorkerSlot) (*agent.Worker, err
 		return worker, nil
 	}
 	id := slot.ProfileID
+	taskID64, _ := strconv.ParseInt(t.ID, 10, 64)
+	proxy := s.m.ProxyAddrForTask(taskID64)
 	runtime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "worker", pinProfileID: &id}
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	worker := agent.NewWorker(runtime, cfg.Model, s.m.dir, tx, runtime.CompactionWindow(), s.agentMaxTurns("worker"))
@@ -688,7 +711,7 @@ func (s *Server) workerForTaskSlot(t *Task, slot WorkerSlot) (*agent.Worker, err
 	worker.SetMaxTokens(runtime.maxTokens)
 	worker.SetNoaEnabled(s.m.NoaCompactionEnabled)
 	worker.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
-	worker.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	worker.SetProxy(proxy, s.m.ProxyCACert())
 	worker.SetProxyProvider(s.m.ProxyAddr)
 	worker.SetWebSearch(s.webSearchFor("worker"))
 	worker.SetConstraintInject(s.constraintInjectWorker)

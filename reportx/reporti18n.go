@@ -63,6 +63,20 @@ func severityName(locale, sev string) string {
 func statusPending(locale string) string {
 	return pick(locale, "待修复", "待修復", "Pending")
 }
+
+// 复测三态文案：与 finding_retests.verdict 的取值一一对应。
+func statusFixed(locale string) string {
+	return pick(locale, "已修复（复测通过）", "已修復（複測通過）", "Fixed (verified by retest)")
+}
+func statusStillReproducible(locale string) string {
+	return pick(locale, "仍可复现（复测未通过）", "仍可重現（複測未通過）", "Still reproducible (retest failed)")
+}
+func statusInconclusive(locale string) string {
+	return pick(locale, "复测无法判定", "複測無法判定", "Retest inconclusive")
+}
+func retestLabel(locale string) string {
+	return pick(locale, "复测结论", "複測結論", "Retest result")
+}
 func statusRemarkFirst(locale string) string {
 	return pick(locale, "本次为首次发现", "本次為首次發現", "First identified in this assessment")
 }

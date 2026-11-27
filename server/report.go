@@ -190,9 +190,15 @@ func (s *Server) buildReportInput(t *Task, q map[string][]string) *reportx.GenIn
 	idFilter := parseInt64Set(get("finding_ids"))
 
 	nodes, _ := t.Store.ListByKind(db.KindFinding, 500)
+	// 排除写入层去重标成 duplicate 的条目：它们已经以初次上报那条的形式进了报告，
+	// 再列一遍会让同一漏洞出现两次。取不到就按空集处理（少排除比报错好）。
+	dupNodes, _ := t.Store.DuplicateNodeIDs()
 	findings := make([]reportx.FindingInput, 0, len(nodes))
 	for _, n := range nodes {
 		if idFilter != nil && !idFilter[n.ID] {
+			continue
+		}
+		if dupNodes[n.ID] {
 			continue
 		}
 		var p struct {
@@ -227,6 +233,17 @@ func (s *Server) buildReportInput(t *Task, q map[string][]string) *reportx.GenIn
 		// transcript, same as the findings-page "AI 分析".
 		if fi.Enrichment == nil {
 			fi.Transcript = s.m.pg.FindingSourceTranscript(n.ID, 40000)
+		}
+		// 复测结论：取该漏洞最新一条 completed 的复测记录。
+		// 为什么放在这里查而不是在 assembleVuln 里：报告组装是唯一持有 pg 的环节，
+		// reportx 是纯渲染层不该碰 DB。只认 completed —— pending/running 还没有结论，
+		// failed 是跑挂了不是"未修复"，两者都不能当复测结论写进交付报告。
+		if retest := latestCompletedRetest(s.m.pg, n.ID); retest != nil {
+			fi.RetestVerdict = retest.Verdict
+			fi.RetestSummary = retest.Summary
+			if retest.FinishedAt != nil {
+				fi.RetestAt = *retest.FinishedAt
+			}
 		}
 		findings = append(findings, fi)
 	}
@@ -325,4 +342,24 @@ func parseInt64Set(csv string) map[int64]bool {
 		return nil
 	}
 	return set
+}
+
+// latestCompletedRetest 返回某漏洞最新一条 completed 复测（无则 nil）。
+// nodeID 是探索图节点 id，finding_retests 用 findings.id 关联，需要先换 id。
+// 容忍失败：报告里少一栏复测结论不能导致整份报告生成失败。
+func latestCompletedRetest(pg *db.DB, nodeID int64) *db.FindingRetest {
+	fid, err := pg.FindingIDByNodeID(nodeID)
+	if err != nil || fid <= 0 {
+		return nil
+	}
+	list, err := pg.ListFindingRetests(fid)
+	if err != nil {
+		return nil
+	}
+	for _, r := range list { // ListFindingRetests 已按 id DESC，第一条即最新
+		if r.Status == "completed" && strings.TrimSpace(r.Verdict) != "" {
+			return r
+		}
+	}
+	return nil
 }

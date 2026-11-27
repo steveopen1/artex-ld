@@ -178,6 +178,25 @@ export default function DashboardPage() {
   const router = useRouter();
   // data state
   const [tasks, setTasks] = React.useState<Task[]>([]);
+  // 单位发现成本：全实例 token 总消耗 ÷ 独立漏洞总数。
+  // 为什么要有这张卡：token 用量和漏洞数是两块互不相干的数字，谁都能看，但
+  // "花了多少才换到一个漏洞"才是判断"这个方向值不值得继续打"的依据。
+  // 独立漏洞用 distinct_findings（去重后的口径），与任务列表页一致；
+  // 用原始 findings 会把同一漏洞的多条上报算成多次发现，成本被低估。
+  // 分子只统计有漏洞产出的任务，避免把纯侦察任务的花费摊进分母。
+  const cost = React.useMemo(() => {
+    let tokens = 0;
+    let vulns = 0;
+    for (const t of tasks) {
+      const v = t.distinct_findings?.total ?? 0;
+      if (v <= 0) continue;
+      const tk = t.tokens;
+      if (tk) tokens += (tk.input_tokens ?? 0) + (tk.output_tokens ?? 0);
+      vulns += v;
+    }
+    return { tokens, vulns, perVuln: vulns > 0 ? Math.round(tokens / vulns) : 0 };
+  }, [tasks]);
+
   const [findings, setFindings] = React.useState<Finding[]>([]);
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [settings, setSettings] = React.useState<Settings | null>(null);
@@ -587,6 +606,23 @@ export default function DashboardPage() {
             <span className="text-red-400">高危 {findingsBySev.high}</span>
             <span className="text-amber-400">中危 {findingsBySev.medium}</span>
             <span className="text-slate-400">低危 {findingsBySev.low}</span>
+          </CardContent>
+        </Card>
+
+        {/* 单位发现成本：把 token 用量与漏洞产出放在一起看 */}
+        <Card className="gap-1">
+          <CardHeader className="pb-0">
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <ZapIcon className="size-3" /> 单位发现成本
+            </div>
+            <div className="text-2xl font-semibold tabular-nums">
+              {cost.vulns > 0 ? fmtTokens(cost.perVuln) : "—"}
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2.5 text-[10px] text-muted-foreground">
+            <span>每漏洞 token</span>
+            <span>总 {fmtTokens(cost.tokens)}</span>
+            <span>{cost.vulns} 个独立漏洞</span>
           </CardContent>
         </Card>
 

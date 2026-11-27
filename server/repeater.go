@@ -59,6 +59,7 @@ func (s *Server) registerRepeater(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/repeater/send", s.sendRepeater)
 }
 
+
 func (s *Server) sendRepeater(w http.ResponseWriter, r *http.Request) {
 	var in repeaterSendRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, repeaterMaxBody))
@@ -73,46 +74,54 @@ func (s *Server) sendRepeater(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "请求体无效")
 		return
 	}
+	// 真正的发送逻辑抽到 executeRepeaterSend：UI 重放与 agent 的 http_replay 工具
+	// 共用同一套 SSRF 防护、重定向策略、hop-by-hop 过滤与 TLS/代理选择 ——
+	// 两处各写一遍必然漂移，而漂移的恰恰是安全边界。
+	resp, err := s.executeRepeaterSend(r.Context(), in)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
+// executeRepeaterSend 执行一次重放并返回结果。error 只表示**请求本身不合法**
+// （方法/URL/协议），传输层失败走响应里的 Error 字段 —— 与原 handler 的
+// "200 + Error" 语义保持一致，调用方据此区分"没发出去"与"发出去但失败了"。
+// 参数校验放在这里而不是 handler 里，因为 agent 工具走的是同一个入口。
+func (s *Server) executeRepeaterSend(ctx context.Context, in repeaterSendRequest) (repeaterSendResponse, error) {
 	method := http.MethodGet
 	if in.Method != nil {
 		method = strings.ToUpper(strings.TrimSpace(*in.Method))
 	}
 	if method == "" {
-		writeErr(w, http.StatusBadRequest, "HTTP 方法不能为空")
-		return
+		return repeaterSendResponse{}, errors.New("HTTP 方法不能为空")
 	}
 	switch method {
 	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch,
 		http.MethodDelete, http.MethodHead, http.MethodOptions:
 	default:
-		writeErr(w, http.StatusBadRequest, "不支持的 HTTP 方法")
-		return
+		return repeaterSendResponse{}, errors.New("不支持的 HTTP 方法")
 	}
-
 	switch in.HTTPVersion {
 	case "", "HTTP/1.1", "HTTP/2.0":
 	default:
-		writeErr(w, http.StatusBadRequest, "当前支持 HTTP/1.1 和 HTTP/2.0")
-		return
+		return repeaterSendResponse{}, errors.New("当前支持 HTTP/1.1 和 HTTP/2.0")
 	}
 
 	rawURL := strings.TrimSpace(in.URL)
 	if rawURL == "" {
-		writeErr(w, http.StatusBadRequest, "url 必填")
-		return
+		return repeaterSendResponse{}, errors.New("url 必填")
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" || u.Hostname() == "" ||
 		!strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
-		writeErr(w, http.StatusBadRequest, "仅支持绝对 http/https URL")
-		return
+		return repeaterSendResponse{}, errors.New("仅支持绝对 http/https URL")
 	}
 	// This check is needed even when a proxy is used: the proxy must remain usable
 	// for normal targets, while obvious literal metadata/loopback URLs stay blocked.
 	if err := repeaterCheckURL(u); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
+		return repeaterSendResponse{}, err
 	}
 
 	timeoutMs := in.TimeoutMs
@@ -134,12 +143,11 @@ func (s *Server) sendRepeater(w http.ResponseWriter, r *http.Request) {
 	if in.Body != "" && method != http.MethodHead {
 		body = strings.NewReader(in.Body)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutMs)*time.Millisecond)
+	sendCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
+	req, err := http.NewRequestWithContext(sendCtx, method, u.String(), body)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "构造请求失败")
-		return
+		return repeaterSendResponse{}, errors.New("构造请求失败")
 	}
 	for key, value := range in.Headers {
 		name := strings.TrimSpace(key)
@@ -203,11 +211,10 @@ func (s *Server) sendRepeater(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, repeaterSendResponse{
+		return repeaterSendResponse{
 			Headers: map[string][]string{}, URL: u.String(),
 			ElapsedMs: time.Since(started).Milliseconds(), Error: repeaterRedactError(err),
-		})
-		return
+		}, nil
 	}
 	defer resp.Body.Close()
 
@@ -230,7 +237,7 @@ func (s *Server) sendRepeater(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out.ElapsedMs = time.Since(started).Milliseconds()
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 // repeaterBodyText keeps the response preview as text for the MVP. Invalid

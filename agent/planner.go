@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log" // 【二开·P-TPL·A4】四级链回退 WARN
 	"norma/agentcore"
+	"norma/hook"
 	"norma/llm"
 	"norma/permission"
 	actool "norma/tool"
@@ -68,6 +69,10 @@ type Planner struct {
 	// guardStatsFn returns the task's platform-governance counters for
 	// graph_overview (blocked / ask / denied). nil = omit the block.
 	guardStatsFn func() any
+	// hooksFn 返回该任务的 Guard 钩子注册表。planner 也需要它 —— 它会跑 Bash，
+	// 而此前 planner/mainagent 完全没有挂 hooks，于是它们的 Bash 既不经过拦截规则
+	// 也不经过范围校验，成了比 worker 更宽的旁路。
+	hooksFn func() *hook.Registry
 
 	// todos keeps ONE plan-scratchpad per task (keyed by exploration id) so the
 	// planner's multi-step plan survives across wake-ups — each Plan() is a fresh
@@ -87,6 +92,9 @@ func (p *Planner) SetCompactionWindowResolver(fn func() int) { p.windowFn = fn }
 // planner wake-up to advance the round counter, maintain cold stamps, and
 // (off the hot path) fold cold nodes into digests. nil = feature disabled.
 func (p *Planner) SetCompactor(c *Compactor) { p.compactor = c }
+
+// SetHooks wires the task's Guard hook registry into the planner session.
+func (p *Planner) SetHooks(fn func() *hook.Registry) { p.hooksFn = fn }
 
 // SetGuardStats wires a resolver returning this task's guard/intercept counters.
 // Read each round so a rebuilt Guard is picked up without rebuilding the Planner.
@@ -383,6 +391,14 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 **每次唤醒的决策流程**：
 
+0. **疑似蜜罐要先回避，不要硬打**：概览里的 honeypot_suspects 字段是静态签名判出的
+   疑似诱捕目标（≥2 条独立指纹，或单条强指纹，如 Cowrie/OpenCanary/HFish/Glastopf 的
+   默认 banner、页面标题、响应头）。对这些目标：**不投递 exploit、不跑弱口令爆破、
+   不做高强度目录爆破**。可以做的只有低成本确证（抓一个 banner、看一个页面）。
+   判断依据：蜜罐的"进展"是假的——拿到 shell 也进不了真实内网，而字典和 exploit
+   的消耗是真的。weak 档（单条低权重命中）不必回避，只降低交互强度。
+   注意 score=0 不等于不是蜜罐，只是没有公开指纹；反之命中一条也可能只是巧合，
+   所以按"信号数"分档而不是当判决。
 1. **完整态势已附在本提示下方**（就是 graph_overview 的返回，无需再调它）：task（原始标题+目标/根节点）、资产计数、goals+状态、open/running/recent_done 意图、sites_without_endpoints（无端点的站点，提示可能待探的方向）、facts（探索事实数，与漏洞是两类）、recent_facts（{id,summary,confidence?}）、guard_stats（平台管控计数：denied=被拦截规则拒绝、ask_denied=人工审批拒/超时、ask_allowed=审批放行、target_blocked=目标侧 WAF/403/429 命中，by_tool 是分工具明细）。
    - **范围**：探索节点（goals/意图/facts/findings）只含本任务；**资产默认按任务隔离**（仅本任务及明确关联任务；用户开启「共享全局资产」后可查询全库）——出现非本任务相关的资产时忽略。
    - **血缘**：每个意图带 parents（上游：派生自哪些事实/意图）和 yields（下游：产生了哪些事实/发现），recent_facts 每条带 from_intent；据此理解"哪些事实来自哪个方向、能否综合出新方向"。
@@ -680,6 +696,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		Settlement:   settle,
 		NonStreaming: p.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
 		MaxTokens:    p.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
+	}
+	if p.hooksFn != nil {
+		opts.Hooks = p.hooksFn()
 	}
 	if p.tx != nil { // persist raw LLM conversation; one accumulating file per task's planner
 		opts.Transcript = p.tx

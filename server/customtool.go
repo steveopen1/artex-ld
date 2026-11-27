@@ -428,6 +428,12 @@ func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, pa
 		return actool.Errorf("command 为空"), nil
 	}
 	cmd := renderTemplate(spec.Command, params, shellQuote)
+	// 自定义 command 工具直接调 NewBash().Call，**不经过 Bash 这个工具的 PreToolUse**，
+	// 所以命令级范围校验在这里必然漏掉（guard 只对名为 Bash/shell_* 的工具取命令文本）。
+	// 渲染后的命令是最终形态，正好在这里补一次校验。
+	if blocked, msg := s.checkCommandScope(ctx, taskIDFromCtx(ctx), "custom-tool", cmd); blocked {
+		return actool.Errorf(msg), nil
+	}
 	// 复用 Bash 也在用的底层 run(经 Bash CoreTool.Call):自动继承安全 floor/超时/
 	// 代理 env/输出溢出。工具与 Bash 平级、共用底层,不经过 Bash 这个工具让模型调。
 	bashIn, _ := json.Marshal(map[string]any{"command": cmd})
@@ -520,6 +526,11 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 	rawURL := renderTemplate(spec.URL, params, identity)
 	if strings.TrimSpace(rawURL) == "" {
 		return actool.Errorf("http url 为空"), nil
+	}
+	// http 工具自建请求、不经过 guard 的 PreToolUse 命令通道 —— 在这里按目标校验范围。
+	// 用 renderTemplate 之后的最终 URL（模板变量已展开，才是真实目标）。
+	if blocked, msg := s.checkURLScope(ctx, "custom-http", rawURL); blocked {
+		return actool.Errorf(msg), nil
 	}
 	var bodyReader io.Reader
 	if spec.Body != "" {

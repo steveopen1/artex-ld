@@ -46,6 +46,7 @@ import type {
   InterceptDetail,
   InterceptPending,
   InterceptReviewInput,
+  InterceptRuleStat,
 } from "@/lib/types";
 import { cn, copyText } from "@/lib/utils";
 
@@ -813,6 +814,9 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState("");
   const [pendingError, setPendingError] = React.useState("");
+  // 按规则聚合的命中数。单独置空即可：拿不到统计不该让整个审批页报错，
+  // 只是这一块不显示（estimate: 统计是辅助信息，不是主流程）。
+  const [ruleStats, setRuleStats] = React.useState<InterceptRuleStat[]>([]);
   const [deciding, setDeciding] = React.useState(false);
   const [revision, setRevision] = React.useState(0);
   const request = React.useRef(0);
@@ -835,11 +839,13 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         // The approval queue is independent of the current history page and its
         // filter. Older requests must remain actionable even when newer decisions
         // fill the page or a filter would hide them.
-        const [history, pending] = await Promise.allSettled([
+        const [history, pending, stats] = await Promise.allSettled([
           taskId
             ? api.interceptTaskPage(taskId, page, pageSize, filter)
             : api.interceptHistoryPage(page, pageSize, filter),
           api.interceptPending(),
+          // 任务维度下只统计本任务的记录；全局页统计全部。与列表同筛选口径。
+          api.interceptHistoryStats(filter),
         ]);
         if (id !== request.current) return;
         if (history.status === "fulfilled") {
@@ -855,6 +861,8 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         } else {
           setPendingError((pending.reason as Error).message || "加载失败");
         }
+        // 统计失败静默降级为空（不弹错误）—— 它是辅助视图，缺失不应遮住主表格。
+        setRuleStats(stats.status === "fulfilled" ? stats.value : []);
         if (manual) setRevision((v) => v + 1);
       } catch (e) {
         if (id === request.current) setError((e as Error).message || "加载失败");
@@ -1087,6 +1095,45 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         <Alert variant="destructive">
           <AlertDescription>待审批加载失败：{pendingError}。请点击刷新重试。</AlertDescription>
         </Alert>
+      ) : null}
+      {ruleStats.length ? (
+        <section className="rounded-xl border">
+          <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-3 font-medium text-sm">
+            <ShieldAlertIcon className="size-4" />
+            规则命中（{ruleStats.length} 条规则）
+            <span className="text-muted-foreground text-xs">按命中次数排序，据此判断哪条规则在挡</span>
+          </div>
+          <Table aria-label="规则命中统计">
+            <TableHeader>
+              <TableRow>
+                <TableHead>规则</TableHead>
+                <TableHead className="w-20 text-right">命中</TableHead>
+                <TableHead className="w-20 text-right">拒绝</TableHead>
+                <TableHead className="w-20 text-right">允许</TableHead>
+                <TableHead className="hidden w-20 text-right sm:table-cell">待审</TableHead>
+                <TableHead className="hidden w-20 text-right md:table-cell">超时</TableHead>
+                <TableHead className="hidden w-36 lg:table-cell">最近命中</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {ruleStats.map((r) => (
+                <TableRow key={`${r.rule_id}-${r.rule_name}`}>
+                  <TableCell className="truncate">
+                    {r.rule_name || <span className="text-muted-foreground">（规则已删除或人工直决）</span>}
+                  </TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">{r.total}</TableCell>
+                  <TableCell className="text-right tabular-nums text-red-600">{r.denied}</TableCell>
+                  <TableCell className="text-right tabular-nums text-emerald-600">{r.allowed}</TableCell>
+                  <TableCell className="hidden text-right tabular-nums sm:table-cell">{r.pending}</TableCell>
+                  <TableCell className="hidden text-right tabular-nums md:table-cell">{r.timedout}</TableCell>
+                  <TableCell className="hidden text-muted-foreground lg:table-cell">
+                    {r.last_at ? new Date(r.last_at).toLocaleString() : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </section>
       ) : null}
       {pending.length ? (
         <section className="rounded-xl border">

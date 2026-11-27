@@ -8,6 +8,52 @@
 
 ### Added
 
+### v0.4.0 —— 对照《ARTEX篇》调研补齐 11 项
+
+- **意图老化**：`Frontier` 原为 `ORDER BY priority DESC, id ASC` 纯优先级队列。planner
+  每轮都会派生新意图，"持续注入高优先级"是常态，于是低优先级意图可以整个任务周期
+  一次都没被领到。改为有效优先级 `priority + LEAST(FLOOR(等待分钟/10), 12)`（封顶 12
+  略高于最高优先级 9，保证饥饿一定在有限时间内被打破），并把 `age_minutes` /
+  `oldest_open_age_minutes` 透出到 graph_overview。
+- **已停止意图审计**：`CountFinishedIntents` 明确排除 `stopped`，被 kill 的意图从所有
+  汇总里消失 —— "我让它别打了"和"它压根没派过"在 planner 眼里一样。新增
+  `CountStoppedIntents`，概览加 `stopped_intents_total`，任务详情「需要关注」加一档。
+- **规则命中聚合**：`intercept_pending` 有 `rule_id` 但无任何聚合，要看"哪条规则在挡"
+  只能翻页数。新增 `InterceptCountsByRule`（复用列表的筛选构造 `buildInterceptConditions`）
+  与 `GET /api/intercept/history/stats`，审批页加"规则命中"看板。
+- **单位发现成本**：dashboard 加卡片（总 token ÷ 独立漏洞数）。数据早已齐备
+  （`TaskDTO.Tokens` + `DistinctFindings`），只差相除。
+- **复测结论进报告**：`finding_retests` 存了 verdict/summary/evidence 但报告全流程不读，
+  报告里"修复情况"永远硬编码"待修复"——复测白跑。`reportx.FindingInput` 加
+  `RetestVerdict/RetestSummary/RetestAt`，md 与 docx 两处渲染同步，三语文案。
+- **启动卫生**：重启后内存运行态丢失但库里仍是"在跑"，任务在 UI 上一直是僵尸。
+  新增 `reconcileStaleRuntimes`（异步、并发核对是否有运行实例，没有的诚实标 paused）。
+- **http_replay 工具**：此前只有 `traffic_search/get/blob` 只读三件套，重放仅在人工 UI。
+  worker 要验证越权/注入只能手搓 curl —— 丢掉原始 Cookie/签名参数，且绕过范围校验。
+  抽出 `executeRepeaterSend` 与 UI 重放共用 SSRF 防护/重定向策略/hop-by-hop 过滤，
+  新工具支持覆盖 method/url/headers/body 与 remove_headers（换身份）。
+- **范围校验·文本层**：`intercept.Match(toolName, input)` 无 taskID/scope，`run_tool`
+  的 ScopeMatcher 又只覆盖受管入口，**Bash 用 curl 打范围外目标完全拦不住**。
+  新建 `scopetext` 包做高置信度目标提取（URL/IP/CIDR/网络工具上下文下的主机名），
+  guard 加 `SetScopeChecker` 钩子（与 SetTrafficMatcher 同构），planner/mainagent
+  补挂 hooks（此前两者完全没挂，是比 worker 更宽的旁路），自定义 command/script/http
+  工具渲染后自查。解析不出目标按既定口径放行并记审计。
+- **范围校验·代理层**：代理是全局单例、无任务归属。新增 `proxyauth` 包用
+  `task-<id>:<hmac>` userinfo 给流量打任务标识，`forward_proxy` 在明文与 CONNECT
+  两条路径上按任务 ScopeMatcher 拒绝越界（403），并剥掉凭证防止泄漏给目标。
+- **findings 写入层去重**：插入前无任何查重，重复上报只能靠事后语义合并。
+  新增 `dedup_key = sha256(vulnclass | 排序资产 | 归一化端点)`，命中**不拒写**而是
+  标记 `duplicate` + `duplicate_of` 并回告 agent（误判时人工可改回，不丢数据），
+  报告侧排除 duplicate。
+- **蜜罐识别**：新增 `honeypot` 包（JSON 签名库 embed + 可热更新，覆盖
+  Cowrie/OpenCanary/Kippo/Glastopf/HFish/Dionaea 默认指纹），资产落库时算
+  `honeypot_score/evidence`；按"双信号才封锁、单信号只降级、全阴性不等于非蜜罐"
+  分档，suspected 进 graph_overview 并在 planner 提示词里明确"不投递、不爆破、不利用"。
+
+**过程中修掉的自身缺陷**：URL 正则未排除 `$`/反引号，导致 `curl "...:8811$p"`
+提取出非法 URL，把**范围内**的合法命令误拦（已加回归测试）；蜜罐签名库只在显式
+`Reload` 后生效而没有任何启动路径调用它，等于静默失效（改为惰性加载，集成测试抓到）。
+
 - **修：Abyss 亮色变量盖掉暗色变量**。亮色块原写作 `:root[data-theme-preset="abyss"]`
   （特异性 0,2,0），高于 globals 的 `.dark`（0,1,0）—— 暗色模式下亮色变量照样生效，
   表现为**卡片白底黑字、侧栏文字深灰几乎看不见**。

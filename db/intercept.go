@@ -345,59 +345,18 @@ func (d *DB) listInterceptsPage(taskID string, page, size int, filter InterceptA
 	}
 	offset := (page - 1) * size
 
-	conditions := []string{}
-	args := []any{}
-	add := func(column, value string) {
-		if value != "" {
-			args = append(args, value)
-			conditions = append(conditions, column+"=$"+fmt.Sprint(len(args)))
-		}
-	}
-	add("ip.task_id", taskID)
-	add("ip.status", filter.Status)
-	add(approvalDecisionSource, filter.DecisionSource)
-	if filter.CreatedFrom != "" {
-		args = append(args, filter.CreatedFrom)
-		conditions = append(conditions, "ip.created_at >= $"+fmt.Sprint(len(args))+"::date")
-	}
-	if filter.CreatedTo != "" {
-		args = append(args, filter.CreatedTo)
-		conditions = append(conditions, "ip.created_at < ($"+fmt.Sprint(len(args))+"::date + INTERVAL '1 day')")
-	}
-	search := strings.TrimSpace(filter.Search)
-	if strings.HasPrefix(search, "#") {
-		id, err := strconv.ParseInt(strings.TrimPrefix(search, "#"), 10, 64)
-		if err != nil || id <= 0 {
-			return nil, 0, fmt.Errorf("审批编号必须为 # 后接正整数")
-		}
-		add("ip.id", strconv.FormatInt(id, 10))
-	} else if search != "" {
-		// Treat SQL LIKE metacharacters literally, including URL percent escapes.
-		pattern := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(search)
-		args = append(args, "%"+pattern+"%")
-		like := "$" + fmt.Sprint(len(args))
-		conditions = append(conditions, `(
-      ip.id::text ILIKE `+like+`
-      OR ip.conversation_id::text ILIKE `+like+`
-      OR COALESCE(ip.task_id, '') ILIKE `+like+`
-      OR COALESCE(ip.agent_name, '') ILIKE `+like+`
-      OR COALESCE(ip.tool_name, '') ILIKE `+like+`
-      OR COALESCE(ip.tool_input::text, '') ILIKE `+like+`
-      OR COALESCE(ip.reason, '') ILIKE `+like+`
-      OR COALESCE(ip.audit::text, '') ILIKE `+like+`
-      OR COALESCE(c.title, '') ILIKE `+like+`
-      OR COALESCE(c.agent_key, '') ILIKE `+like+`
-      OR COALESCE(t.name, '') ILIKE `+like+`
-      OR COALESCE(t.description, '') ILIKE `+like+`
-      OR COALESCE(t.goal, '') ILIKE `+like+`
-      OR COALESCE(ir.name, '') ILIKE `+like+`
-    )`)
+	conditions, args, err := buildInterceptConditions(taskID, filter)
+	if err != nil {
+		return nil, 0, err
 	}
 	where := ""
 	if len(conditions) > 0 {
 		where = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	var total int
+	// count 的 FROM 选择依赖搜索条件是否用到 JOIN 出来的列（c.title / t.name / ir.name）；
+	// search 本身已在 buildInterceptConditions 内部消费，这里只复用它做判定。
+	search := strings.TrimSpace(filter.Search)
 	countFrom := "FROM intercept_pending ip"
 	if search != "" && !strings.HasPrefix(search, "#") {
 		countFrom = approvalRowJoins
@@ -426,4 +385,112 @@ func (d *DB) listInterceptsPage(taskID string, page, size int, filter InterceptA
 		out = append(out, r)
 	}
 	return out, total, rows.Err()
+}
+
+// buildInterceptConditions 把审批列表/聚合共用的筛选条件拼成 (conditions, args)。
+// 抽出来是为了让"按规则聚合命中数"与"分页列表"用**完全同一套筛选语义** ——
+// 两处各写一遍必然漂移，用户会发现"筛完列表看到 30 条，统计说 25 条"。
+// 返回的 conditions 已含 $n 占位，args 顺序与之一一对应。
+func buildInterceptConditions(taskID string, filter InterceptApprovalFilter) ([]string, []any, error) {
+	conditions := []string{}
+	args := []any{}
+	add := func(column, value string) {
+		if value != "" {
+			args = append(args, value)
+			conditions = append(conditions, column+"=$"+fmt.Sprint(len(args)))
+		}
+	}
+	add("ip.task_id", taskID)
+	add("ip.status", filter.Status)
+	add(approvalDecisionSource, filter.DecisionSource)
+	if filter.CreatedFrom != "" {
+		args = append(args, filter.CreatedFrom)
+		conditions = append(conditions, "ip.created_at >= $"+fmt.Sprint(len(args))+"::date")
+	}
+	if filter.CreatedTo != "" {
+		args = append(args, filter.CreatedTo)
+		conditions = append(conditions, "ip.created_at < ($"+fmt.Sprint(len(args))+"::date + INTERVAL '1 day')")
+	}
+	search := strings.TrimSpace(filter.Search)
+	if strings.HasPrefix(search, "#") {
+		id, err := strconv.ParseInt(strings.TrimPrefix(search, "#"), 10, 64)
+		if err != nil || id <= 0 {
+			return nil, nil, fmt.Errorf("审批编号必须为 # 后接正整数")
+		}
+		add("ip.id", strconv.FormatInt(id, 10))
+	} else if search != "" {
+		// Treat SQL LIKE metacharacters literally, including URL percent escapes.
+		pattern := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(search)
+		args = append(args, "%"+pattern+"%")
+		like := "$" + fmt.Sprint(len(args))
+		conditions = append(conditions, `(
+      ip.id::text ILIKE `+like+`
+      OR ip.conversation_id::text ILIKE `+like+`
+      OR COALESCE(ip.task_id, '') ILIKE `+like+`
+      OR COALESCE(ip.agent_name, '') ILIKE `+like+`
+      OR COALESCE(ip.tool_name, '') ILIKE `+like+`
+      OR COALESCE(ip.tool_input::text, '') ILIKE `+like+`
+      OR COALESCE(ip.reason, '') ILIKE `+like+`
+      OR COALESCE(ip.audit::text, '') ILIKE `+like+`
+      OR COALESCE(c.title, '') ILIKE `+like+`
+      OR COALESCE(c.agent_key, '') ILIKE `+like+`
+      OR COALESCE(t.name, '') ILIKE `+like+`
+      OR COALESCE(t.description, '') ILIKE `+like+`
+      OR COALESCE(t.goal, '') ILIKE `+like+`
+      OR COALESCE(ir.name, '') ILIKE `+like+`
+    )`)
+	}
+	return conditions, args, nil
+}
+
+// InterceptRuleStat 是按拦截规则聚合的一行命中统计。
+// 之前只有逐条审批记录（带 rule_id/rule_name 但没有聚合），要看"哪条规则在挡"
+// 只能翻页数，规则治理无从下手。
+type InterceptRuleStat struct {
+	RuleID   int64     `json:"rule_id"` // 0 = 规则已删除，或人工直决（无规则）
+	RuleName string    `json:"rule_name"` // 规则删除后为空串
+	Total    int       `json:"total"`     // 命中总数
+	Denied   int       `json:"denied"`    // 其中被拒
+	Allowed  int       `json:"allowed"`   // 其中被放行
+	Pending  int       `json:"pending"`   // 其中待处理
+	Timedout int       `json:"timedout"`  // 其中超时（timeout_action 生效）
+	LastAt   time.Time `json:"last_at"`   // 最近一次命中时间
+}
+
+// InterceptCountsByRule 按规则聚合命中数（含状态分档），供审批页的"规则命中"看板。
+// 筛选语义与 ListAllInterceptsPage 完全一致。按命中总数降序 —— 挡得最多的排最前。
+func (d *DB) InterceptCountsByRule(filter InterceptApprovalFilter) ([]InterceptRuleStat, error) {
+	conditions, args, err := buildInterceptConditions("", filter)
+	if err != nil {
+		return nil, err
+	}
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	q := `SELECT COALESCE(ip.rule_id,0), COALESCE(ir.name,''),
+       COUNT(*),
+       COUNT(*) FILTER (WHERE ip.status='denied'),
+       COUNT(*) FILTER (WHERE ip.status='allowed'),
+       COUNT(*) FILTER (WHERE ip.status='pending'),
+       COUNT(*) FILTER (WHERE ip.status='timeout'),
+       MAX(ip.created_at)
+FROM intercept_pending ip
+LEFT JOIN intercept_rules ir ON ir.id = ip.rule_id` + where + `
+GROUP BY 1,2
+ORDER BY 3 DESC, 1 ASC`
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []InterceptRuleStat{}
+	for rows.Next() {
+		var r InterceptRuleStat
+		if err := rows.Scan(&r.RuleID, &r.RuleName, &r.Total, &r.Denied, &r.Allowed, &r.Pending, &r.Timedout, &r.LastAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
