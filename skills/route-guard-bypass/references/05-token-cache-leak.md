@@ -7,8 +7,8 @@
 
 ## 一、缓存 Token 提取
 
-> **artex-ld 适配说明**：原文用 `evaluate_script` 在页面 main world 里执行 JS 取
-> localStorage/sessionStorage。artex-ld 的浏览器 MCP 提供 `dom_cua_get_visible_dom`
+> **本平台适配说明**：原文用 `evaluate_script` 在页面 main world 里执行 JS 取
+> localStorage/sessionStorage。本平台 的浏览器 MCP 提供 `dom_cua_get_visible_dom`
 > / `dom_cua_click` / `dom_cua_type` 等交互能力与 `tab_screenshot`，**没有等价的
 > 页面内 JS 求值工具**。可替代路径：
 >
@@ -23,7 +23,7 @@
 
 ```bash
 # 提取所有 localStorage
-浏览器侧求值（artex-ld 无此工具，见上方适配说明）(
+浏览器侧求值（本平台 无此工具，见上方适配说明）(
   function="() => {
     const all = {};
     for (let i = 0; i < localStorage.length; i++) {
@@ -51,7 +51,7 @@
 
 ```bash
 # 提取关键字段
-浏览器侧求值（artex-ld 无此工具，见上方适配说明）(
+浏览器侧求值（本平台 无此工具，见上方适配说明）(
   function="() => ({
     // 登录态
     login_status: localStorage.getItem('login_status'),
@@ -90,7 +90,7 @@
 ### 1.3 sessionStorage 提取
 
 ```bash
-浏览器侧求值（artex-ld 无此工具，见上方适配说明）(
+浏览器侧求值（本平台 无此工具，见上方适配说明）(
   function="() => {
     const all = {};
     for (let i = 0; i < sessionStorage.length; i++) {
@@ -107,13 +107,13 @@
 
 ```bash
 # 全部 cookie
-浏览器侧求值（artex-ld 无此工具，见上方适配说明）(
+浏览器侧求值（本平台 无此工具，见上方适配说明）(
   function="() => document.cookie",
   mainWorld=true
 )
 
 # 解析为 JSON
-浏览器侧求值（artex-ld 无此工具，见上方适配说明）(
+浏览器侧求值（本平台 无此工具，见上方适配说明）(
   function="() => {
     return document.cookie.split('; ').reduce((acc, c) => {
       const [k, v] = c.split('=');
@@ -129,7 +129,7 @@
 
 ```bash
 # 查找 store / token / user 命名的全局变量
-浏览器侧求值（artex-ld 无此工具，见上方适配说明）(
+浏览器侧求值（本平台 无此工具，见上方适配说明）(
   function="() => {
     const matches = {};
     Object.keys(window).forEach(k => {
@@ -151,7 +151,7 @@
 
 ```bash
 # 注入伪造 token(让前端认为已登录)
-浏览器侧求值（artex-ld 无此工具，见上方适配说明）(
+浏览器侧求值（本平台 无此工具，见上方适配说明）(
   function="() => {
     localStorage.setItem('login_status', '200');
     localStorage.setItem('user_info_bi', JSON.stringify({
@@ -371,7 +371,7 @@ done
 
 ```bash
 # Step 1: 提取 localStorage token
-浏览器侧求值（artex-ld 无此工具，见上方适配说明）(
+浏览器侧求值（本平台 无此工具，见上方适配说明）(
   function="() => localStorage.getItem('token')"
 )
 # → "eyJhbGciOiJIUzI1NiIs..."

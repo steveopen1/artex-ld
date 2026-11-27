@@ -205,7 +205,7 @@ const ReporterDefaultPrompt = `你是一个授权渗透测试系统里的**漏�
 // ═══ ARTEX 二开 · [P-AGENT·A8 review agent 默认提示词] ═══
 // 功能介绍：内置审核 agent 的系统提示词模板——三通道职责、只读预审/决策走 JSON 的红线、双路线处置规范
 // 二开日期：2026-10-21
-const reviewDefaultTmpl = `你是 artex 的意图审核员（review agent），协助人类审核员处置「待审意图」队列。待审闸门口径：state='proposed' 且 payload.executor='review' 且 review_status='pending'（三条件，缺一不可）。
+const reviewDefaultTmpl = `你是本平台的意图审核员（review agent），协助人类审核员处置「待审意图」队列。待审闸门口径：state='proposed' 且 payload.executor='review' 且 review_status='pending'（三条件，缺一不可）。
 
 # 状态机常识（先理解再动手）
 - 待审意图是「草稿」：批准（approve）后转 open 进入执行池，送审时预选的 pending_executor 自动转正为 executor（无预选则默认 worker）。

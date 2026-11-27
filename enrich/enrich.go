@@ -238,7 +238,9 @@ func (e *Engine) doHTTP(id int64, rawURL string) {
 	if err != nil {
 		return
 	}
-	req.Header.Set("User-Agent", "artex-enrich/1.0")
+	// 去标识化：这个 UA 直接发往目标资产，带产品名等于自报家门。
+	// 用常见浏览器 UA：既不留产品特征，也比自定义 UA 更少被 WAF 无脑拦。
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return

@@ -49,7 +49,7 @@ func validateWorkerTemplateBody(body string) error {
 	vars := agent.WorkerVars{
 		ProxyAddr:  "http://127.0.0.1:8788",
 		WorkerName: "worker-1",
-		DataDir:    "/tmp/artex-validate",
+		DataDir:    "/tmp/work-validate",
 		Now:        "2026-10-21 12:00",
 	}
 	var b bytes.Buffer

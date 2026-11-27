@@ -263,8 +263,8 @@ done
 | 🟡 P2 | `industry-liangyou-bypass.png` | /index_chanye_new_ly.html?type=liangyou | 粮油产业 |
 | 🟡 P2 | `industry-shucai-bypass.png` | /index_chanye_new.html?type=shucai | 蔬菜产业 |
 
-> **artex-ld 适配说明**：本 skill 原文基于 Claude Code + yakit MCP（`start_mitm_v2` /
-> `set_current_rules` 做的是**响应体内容改写**）。artex-ld 的平台拦截规则
+> **本平台适配说明**：本 skill 原文基于 Claude Code + yakit MCP（`start_mitm_v2` /
+> `set_current_rules` 做的是**响应体内容改写**）。本平台 的平台拦截规则
 > （`POST /api/intercept/rules`）只做 **allow / deny / ask** 三种放行决策，
 > **不能改写响应内容**。要做"把 guard.js 换成无鉴权版本"这类操作，用下面两种方式之一：
 >

@@ -19,7 +19,7 @@ description: "Web指纹识别工具，用于识别目标网站使用的框架、
 >
 > 详细配比原则见 `references/system-category-routing.md`（分类编排路由）。
 >
-> **artex-ld 适配说明**：原文基于 Claude Code + yakit MCP。本平台没有 yakit，
+> **本平台适配说明**：原文基于 Claude Code + yakit MCP。本平台没有 yakit，
 > 等价能力为：`fetch`（发请求看回包）、`traffic_search`/`traffic_get`（回看录制过的流量，
 > 避免重复请求）、`mcp__browser__*`（浏览器取样）。方法论、指纹库与分类判定部分未改动。
 

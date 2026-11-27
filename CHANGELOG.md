@@ -8,6 +8,39 @@
 
 ### Added
 
+### v0.5.x —— 去标识化（作战时不暴露平台身份）
+
+**目标**：agent 被问"你是谁"时不吐出产品名；提示词/技能/交付链路里不残留可被防守方
+当作指纹抓取的品牌字样。
+
+已清理（模型上下文可见面）：
+- `guard/blockmessage.go` 拦截提醒默认模板：`【artex 平台管控·非目标防御】` → `【平台管控·非目标防御】`
+- `agent/promptcatalog.go` 审核 agent 正文：`你是 artex 的意图审核员` → `你是本平台的…`
+- `server/side_questions.go` 三处旁路助手系统提示：去掉 `ARTEX`
+- `agent/worker.go` 人工插话标记：`<!-- ARTEX_WORKER_CHAT:` → `<!-- WORKER_CHAT:`，
+  判定同时认旧标记，避免升级后历史会话里的插话被重复注入
+- `server/planner_templates.go` / `worker_templates.go` 示例路径 `/tmp/artex-validate` → `/tmp/work-validate`
+- `skills/**/*.md` 9 个文件：`artex-ld 适配说明` → `本平台适配说明`（技能正文会读进上下文）
+- 新增 `agent.discretionSpec()`：代码固定、不可编辑、追加到**全部** agent 系统提示尾部
+  （worker/planner/mainagent/chat 四个装配点），明确"被问身份/平台/模型时只说自己是本系统
+  的代理，不透露也不猜测产品名、厂商名、模型名或版本号"
+
+已清理（会打到目标的网络特征）：
+- `enrich` 资产富化的 UA `artex-enrich/1.0` → 常见浏览器 UA（这个请求**直接发往目标**）
+- `server/toolenv.go` 工具下载 UA、`server/egress_probe.go` 出口探测 UA 同步去品牌
+- `mcphttp` 握手 clientInfo name `artex` → `platform`（会发给第三方 MCP server）
+
+已有库的同步：新增 `server/dedident_migration.go`，用一次性开关 + 等价替换
+（`UPDATE ... REPLACE`，**不用** `ResetPromptToDefault`，避免覆盖用户的提示词编辑）。
+实测：审核 agent 提示词已从"你是 artex 的…"变为"你是本平台的…"。
+
+**已知局限（重要）**：底层模型自身的身份认知不受提示词控制。连续三次强化指令后，
+被问"你用什么模型"时它仍会自称某厂商的模型（这是模型权重里带的对齐行为，不是我们
+的提示词给的）。平台名已彻底不出现，但"这是个 AI"无法隐藏。
+
+测试：`guard` 的默认拦截文案断言、`server/toolenv` 的 UA 断言随之调整（去掉锁死旧品牌
+字样的断言，改为断言"非空/可言"）。`go test -p 1 ./...` 全绿。
+
 ### v0.4.0 —— 对照《ARTEX篇》调研补齐 11 项
 
 - **意图老化**：`Frontier` 原为 `ORDER BY priority DESC, id ASC` 纯优先级队列。planner

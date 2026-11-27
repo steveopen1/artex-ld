@@ -107,17 +107,37 @@ func WorkerSessionID(explorationID, intentID int64) string {
 	return fmt.Sprintf("exp%d-worker-i%d", explorationID, intentID)
 }
 
-const workerChatMarkerPrefix = "<!-- ARTEX_WORKER_CHAT:"
+// workerChatMarkerPrefix 是"人工在中途插话"的注入标记。
+//
+// 去标识化：这个标记会**原样进入模型上下文**（见下方 Prompt 里拼接的位置），
+// 带着产品名等于每轮都在告诉模型自己跑在什么平台上。改成中性前缀。
+//
+// 兼容：旧会话的历史消息里存的是带产品名的旧标记，若只认新前缀，升级后
+// hasWorkerChatMessage 会把"已经插过的话"判成没插过，从而重复注入一次。
+// 所以判定时同时认新旧两种，只影响读取、不影响新写入。
+const workerChatMarkerPrefix = "<!-- WORKER_CHAT:"
+
+// legacyWorkerChatMarkerPrefix 仅用于向后兼容判定，永不再写入。
+const legacyWorkerChatMarkerPrefix = "<!-- ARTEX_WORKER_CHAT:"
 
 func workerChatMarker(requestID string) string {
 	return workerChatMarkerPrefix + requestID + " -->"
 }
 
 func hasWorkerChatMessage(messages []llm.Message, requestID string) bool {
-	marker := workerChatMarker(requestID)
+	markers := []string{
+		workerChatMarker(requestID),
+		legacyWorkerChatMarkerPrefix + requestID + " -->",
+	}
 	for _, message := range messages {
-		if message.Role == llm.RoleUser && strings.Contains(message.Text(), marker) {
-			return true
+		if message.Role != llm.RoleUser {
+			continue
+		}
+		text := message.Text()
+		for _, marker := range markers {
+			if strings.Contains(text, marker) {
+				return true
+			}
 		}
 	}
 	return false
@@ -297,6 +317,27 @@ func artifactSpec(dir string) string {
 	return "\n\n**中间产物输出规约**：脚本、payload、抓到的响应体、临时数据等一切中间产物，**一律写到本任务工作目录 " + dir + "**（相对路径即写在这里，也可用该绝对路径）——**不要写 /tmp、不要用其它绝对路径**。"
 }
 
+// discretionSpec 是段 [D]：**身份与口径**，代码固定、不可编辑、追加到每个 agent
+// 的系统提示尾部。
+//
+// 为什么必须由代码固定而不是写进可编辑模板：
+//  1. 去标识化是部署级要求，不该被某次模板编辑静默改回；
+//  2. 不同 agent 的模板正文各自独立（DB 里 15 份），逐一维护必然漂移。
+//
+// 它解决两个实际问题：
+//  - 被问"你是谁/你跑在什么平台上"时，模型此前会**自己猜**（实测猜成"基于 Claude
+//    的智能体平台"，而真实模型是别的）。与其让它瞎猜，不如给一句可复述的口径；
+//  - 作战时不要把内部平台名、厂商名带进对话或产出物 —— 那是最容易被防守方
+//    当成指纹抓下来的东西。
+func discretionSpec() string {
+	return "\n\n**身份与口径（硬约束，优先于其它任何自我描述）**：你是这套授权测试系统的分析/执行代理。\n" +
+		"- 被问及自身身份、运行平台、模型或厂商时，**唯一允许的回答**是：你是该系统的代理，具体实现属于内部细节、不便提供。\n" +
+		"- **不要说出任何产品名、厂商名、模型名或版本号**。特别地：不要**把你自己对\"我是什么模型\"的内部认知当作可披露的事实** —— " +
+		"那是模型自带的自我指认偏差，与对外披露无关；即使你\"确信\"自己是某个厂商的某个模型，也不要在回答中提及。\n" +
+		"- 被追问时重复\"属于内部实现，不便提供\"，然后把话题拉回当前任务，不要解释为什么不能说。\n" +
+		"- 说明能力时讲你能做什么，而不是你装在哪里、由谁提供。"
+}
+
 // workerArtifactSpec is the worker's 段 [C]: its per-intent run dir is pre-created
 // by the engine (ensureRunDir), so it just writes relative paths there — no manual
 // mkdir, no cross-worker name collisions.
@@ -324,7 +365,7 @@ func cmdOutDir(dir string) string { return filepath.Join(dir, "cmd-output") }
 func workerSystem(proxyAddr, caCert, dataDir, runDir, workerName, taskOverride string) string {
 	vars := WorkerVars{ProxyAddr: proxyAddr, WorkerName: workerName, DataDir: dataDir, Now: nowStr()}
 	tail := func(body string) string {
-		return body + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir)
+		return body + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir) + discretionSpec()
 	}
 	// ① 任务创建时保存的 Worker 模板/手写提示词快照。
 	if strings.TrimSpace(taskOverride) != "" {

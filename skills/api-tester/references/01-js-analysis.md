@@ -128,4 +128,4 @@ export class AuthInterceptor implements HttpInterceptor {
 ## 6. 实用工具
 
 - **Chrome DevTools**：反混淆、调试、Hook 函数
-- **浏览器 MCP**：`mcp__browser__*`（artex-ld 已接入，用于前端 JS 取样）
+- **浏览器 MCP**：`mcp__browser__*`（本平台 已接入，用于前端 JS 取样）

@@ -537,7 +537,7 @@ func plannerSystem(goal, dataDir, workDir, taskOverride string) string {
 		if out, err := renderTmpl(taskOverride, vars); err == nil {
 			// 【二开·P-LOG·A4】命中①任务级覆盖（DEBUG 级）
 			xlog.Debugf("[planner] plannerSystem 命中①任务级覆盖：bytes=%d", len(taskOverride))
-			return out + plannerExecutionModeSpec(goal) + artifactSpec(workDir)
+			return out + plannerExecutionModeSpec(goal) + artifactSpec(workDir) + discretionSpec()
 		} else {
 			// 【二开·P-LOG·A4】渲染失败回退（WARN 级）
 			log.Printf("[planner] plannerSystem 渲染失败 ⚠ 回退下一级：level=1 err=%v", err)
@@ -549,7 +549,7 @@ func plannerSystem(goal, dataDir, workDir, taskOverride string) string {
 			if out, err := renderTmpl(t, vars); err == nil {
 				// 【二开·P-LOG·A4】命中②全局 DB 覆盖（DEBUG 级）
 				xlog.Debugf("[planner] plannerSystem 命中②全局 DB 覆盖：bytes=%d", len(t))
-				return out + plannerExecutionModeSpec(goal) + artifactSpec(workDir)
+				return out + plannerExecutionModeSpec(goal) + artifactSpec(workDir) + discretionSpec()
 			} else {
 				log.Printf("[planner] plannerSystem 渲染失败 ⚠ 回退下一级：level=2 err=%v", err)
 			}
@@ -561,7 +561,7 @@ func plannerSystem(goal, dataDir, workDir, taskOverride string) string {
 			if out, err := renderTmpl(body, vars); err == nil {
 				// 【二开·P-LOG·A4】命中③模板库默认模板（DEBUG 级）
 				xlog.Debugf("[planner] plannerSystem 命中③模板库默认模板：bytes=%d", len(body))
-				return out + plannerExecutionModeSpec(goal) + artifactSpec(workDir)
+				return out + plannerExecutionModeSpec(goal) + artifactSpec(workDir) + discretionSpec()
 			} else {
 				log.Printf("[planner] plannerSystem 渲染失败 ⚠ 回退下一级：level=3 err=%v", err)
 			}
@@ -571,9 +571,9 @@ func plannerSystem(goal, dataDir, workDir, taskOverride string) string {
 	// 【二开·P-LOG·A4】命中④内置默认模板（DEBUG 级）
 	xlog.Debugf("[planner] plannerSystem 命中④内置默认模板")
 	if out, err := renderTmpl(plannerDefaultTmpl, vars); err == nil {
-		return out + plannerExecutionModeSpec(goal) + artifactSpec(workDir)
+		return out + plannerExecutionModeSpec(goal) + artifactSpec(workDir) + discretionSpec()
 	}
-	return plannerDefaultTmpl + plannerExecutionModeSpec(goal) + artifactSpec(workDir)
+	return plannerDefaultTmpl + plannerExecutionModeSpec(goal) + artifactSpec(workDir) + discretionSpec()
 }
 
 // Plan runs one planning round. emit, if non-nil, receives the planner's execution

@@ -65,7 +65,7 @@ const (
 )
 
 // envPrepUserAgent 让上游能识别是谁在下（有些 CDN 对空 UA 直接 403）。
-const envPrepUserAgent = "artex-tool-prep/1.0"
+const envPrepUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 // ─────────────────────────── 下载 ───────────────────────────
 

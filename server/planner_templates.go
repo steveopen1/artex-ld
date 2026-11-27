@@ -50,7 +50,7 @@ func validatePlannerTemplateBody(body string) error {
 		Goal:         "拿下 example.com 后台权限",
 		Scope:        "example.com",
 		AssetSummary: "站点 https://example.com（示例资产摘要）",
-		DataDir:      "/tmp/artex-validate",
+		DataDir:      "/tmp/work-validate",
 		Now:          "2026-10-21 12:00",
 	}
 	var b bytes.Buffer

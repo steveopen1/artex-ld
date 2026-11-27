@@ -11,11 +11,12 @@ import (
 	"norma/hook"
 )
 
-// TestRenderBlockMessageDefault 默认模板必须与历史文案等价：模型看到的仍然
-// 是「平台管控·非目标防御」这句话，否则老部署的行为会静默改变。
+// TestRenderBlockMessageDefault 默认模板的文案必须稳定：模型看到的就是这段。
+// 除产品名外措辞与历史一致（去标识化只去掉平台名，不改语义）。
 func TestRenderBlockMessageDefault(t *testing.T) {
 	got := RenderBlockMessage("", BlockMessageVars{Reason: "禁止删除数据"})
-	want := "【artex 平台管控·非目标防御】此调用被平台拦截。原因：禁止删除数据。此操作被禁止。"
+	// 去标识化后的默认文案：不再带产品名（模型会读到这段，带产品名等于自报家门）。
+	want := "【平台管控·非目标防御】此调用被平台拦截。原因：禁止删除数据。此操作被禁止。"
 	if got != want {
 		t.Fatalf("default render = %q\nwant           %q", got, want)
 	}

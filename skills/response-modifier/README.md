@@ -11,7 +11,7 @@
 | `start_proxy.py` | 启动器：自动挑一个空闲端口起 mitmproxy 并加载规则 |
 | `rules_example.json` | 规则文件示例（复制后改成 `rules.json` 使用） |
 
-## 与 artex-ld 平台的关系
+## 与 本平台 平台的关系
 
 **平台本身不含响应体改写能力**：`intercept` 规则只做 allow / deny / ask 三种放行决策。
 所以改写必须靠本目录的 mitmproxy addon。

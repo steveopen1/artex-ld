@@ -332,6 +332,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
 		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
+		// 去标识化：把历史提示词里残留的产品名换成中性表述。
+		// 放在 seedPrompts 之后（新库播种的是已去标识的代码默认，无需再改），
+		// 且只做等价替换、不重置默认 —— 用户对提示词的其它编辑必须保留。
+		s.migrateDeidentifyPrompts()
 		// 【二开·P-REVIEW·D9】起 —— 审核写工具 intercept ask 化（启用集+三条内置规则，幂等）
 		s.seedReviewIntercept()
 		// 【二开·P-REVIEW·D9】止

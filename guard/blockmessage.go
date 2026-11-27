@@ -28,7 +28,7 @@ type BlockMessageVars struct {
 // DefaultBlockMessageTemplate 是既有行为的等价默认值：保留「平台管控·非目标防御」
 // 这个关键前缀与「此操作被禁止」的结尾。它不是装饰——原有注释解释了模型会把裸
 // reason（"禁止执行此工具"）误读成目标侧 403 并尝试绕过，那正是这个前缀存在的理由。
-const DefaultBlockMessageTemplate = "【artex 平台管控·非目标防御】此调用被平台拦截。原因：{reason}。此操作被禁止。"
+const DefaultBlockMessageTemplate = "【平台管控·非目标防御】此调用被平台拦截。原因：{reason}。此操作被禁止。"
 
 // maxCommandInMessage 限制命令回显长度：拦截消息会进下一轮上下文，超长命令（比如
 // 一整个 base64 payload）会把 prompt 撑大，且对判断毫无帮助。

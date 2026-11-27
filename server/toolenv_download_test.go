@@ -30,8 +30,10 @@ func newPrepTestServer(t *testing.T) *Server {
 func TestEnvPrepDownloadFetchesZip(t *testing.T) {
 	body := zipWith(t, map[string]string{"gogo_tool.exe": "MZ fake"})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ua := r.Header.Get("User-Agent"); !strings.HasPrefix(ua, "artex-tool-prep") {
-			t.Errorf("期望带平台 UA，实得 %q", ua)
+		// 只断言"带了可识别的 UA"，不断言具体字样 —— 去标识化要求 UA 里不能出现
+		// 产品名，锁死旧前缀会让这条测试在每次品牌调整时误报。
+		if ua := r.Header.Get("User-Agent"); ua == "" {
+			t.Errorf("下载请求必须带 User-Agent（部分 CDN 对空 UA 直接 403）")
 		}
 		w.Header().Set("Content-Type", "application/zip")
 		_, _ = w.Write(body)
