@@ -133,15 +133,64 @@ type SpawnSpec struct {
 	Env []string
 }
 
-// withEnv returns the current process environment extended with extra
-// "KEY=VALUE" entries, or nil when extra is empty (child inherits unchanged).
-// os/exec dedups by key — case-insensitive on Windows, keeping the LAST
-// occurrence — so the appended entries override inherited ones on every OS.
-func withEnv(extra []string) []string {
-	if len(extra) == 0 {
-		return nil
+// sensitiveEnvPrefixes / sensitiveEnvFragments 是**不传给子进程**的环境变量。
+//
+// 为什么不能直接继承 os.Environ()：worker 跑的是任意 Bash/curl/nmap，agent 一条
+// `env` 或 `cat /proc/self/environ` 就能把父进程的整份环境读出来。实测确认过两条
+// 真实后果：
+//  1. 平台自身的 DSN 变量（形如 <产品名>_PG_DSN）会暴露产品名与数据库口令；
+//  2. 从调用方 shell 继承来的、与平台无关的令牌也会一并泄漏。
+//
+// 这是"去标识化"里提示词管不到的一层：模型不主动说产品名，但环境变量会替它说。
+//
+// 过滤按前缀 + 片段两个维度，宁可多滤：
+//   - 前缀：平台自有变量前缀与常见的宿主工具前缀；
+//   - 片段：名字里带凭据/密钥语义的变量（不同部署叫法不一，用片段覆盖）。
+//
+// 需要给子进程传额外变量时，用 ToolContext.Env 显式给，或换一个不含这些片段的
+// 变量名 —— 显式传的 extra 不受这里过滤。
+var sensitiveEnvPrefixes = []string{"ARTEX_", "ZCODE_"}
+
+var sensitiveEnvFragments = []string{
+	"_PG_DSN", "PG_DSN", "_API_KEY", "API_KEY", "_APIKEY", "APIKEY",
+	"_SECRET", "SECRET_", "PASSWORD", "_TOKEN", "TOKEN_",
+}
+
+// denyChildEnv 判断某环境变量名是否不该传给子进程。
+func denyChildEnv(name string) bool {
+	up := strings.ToUpper(name)
+	for _, p := range sensitiveEnvPrefixes {
+		if strings.HasPrefix(up, p) {
+			return true
+		}
 	}
-	return append(os.Environ(), extra...)
+	for _, f := range sensitiveEnvFragments {
+		if strings.Contains(up, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// childEnv 构造子进程环境：过滤掉敏感/可识别变量，再叠加显式 extra。
+// 与原来 withEnv 的差别是**永远返回完整切片**（不再返回 nil 让子进程继承全部）。
+// os/exec 按 key 去重、保留最后一个，所以 extra 仍然覆盖同名继承值。
+func childEnv(extra []string) []string {
+	base := os.Environ()
+	out := make([]string, 0, len(base)+len(extra))
+	for _, kv := range base {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || denyChildEnv(name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, extra...)
+}
+
+// withEnv 保留旧调用签名（多处使用），内部改为走 childEnv。
+func withEnv(extra []string) []string {
+	return childEnv(extra)
 }
 
 // Manager owns the background tasks of one Session.

@@ -8,6 +8,31 @@
 
 ### Added
 
+### v0.5.4 —— 去标识化：子进程环境与进程名
+
+实测发现提示词之外还有三条泄漏，都在"agent 自己去看环境"时暴露：
+
+1. **Bash 子进程继承全部环境变量**。`norma/tool/task.go:withEnv` 原本是
+   `append(os.Environ(), extra...)`，且 extra 为空时直接返回 nil 让子进程继承完整
+   环境。实测 agent 跑一条 `env` 就能读到：
+   - 平台 DSN 变量（形如 `<产品名>_PG_DSN`），**含数据库口令**；
+   - 从调用方 shell 继承的、与平台无关的第三方令牌。
+   改为 `childEnv()`：按前缀（`ARTEX_`/`ZCODE_`）与片段（`*_API_KEY`/`*_SECRET`/
+   `*_TOKEN`/`*PG_DSN`/`PASSWORD`）过滤，**永远返回显式切片**（不再返回 nil），
+   显式 extra 不过滤且排末尾。附带测试 `envfilter_test.go`。
+
+2. **二进制名**：`ps` 直接显示 `/tmp/artex-vN`。部署改用中性名 `/tmp/rt-engine`。
+
+3. **看护脚本路径**：`/root/work-arTex/keepalive.sh` 含项目名。挪到 `/root/.rt/svc.sh`，
+   并用 `env -i` 显式构造服务进程环境（纵深防御第二层，见脚本注释）。
+
+实测验证（任务 9，让 worker 自己跑 `env` 并写回事实）：修复后 worker 只看到
+`PWD/TZ/HOME/LANG/SHLVL/PATH/_` 七个变量，`grep -iE 'ARTEX|DSN|TOKEN|SECRET|PASSWORD'`
+**零命中**，`_=/usr/bin/env`（不泄漏二进制路径）。
+
+**仍未解决（部署层面）**：Postgres 进程标题是 `postgres: artex artex`，同机 `ps` 可见。
+需把数据库角色名与库名改掉，或把 PG 放到另一台主机/命名空间；属数据迁移操作，未擅自执行。
+
 ### v0.5.x —— 去标识化（作战时不暴露平台身份）
 
 **目标**：agent 被问"你是谁"时不吐出产品名；提示词/技能/交付链路里不残留可被防守方
