@@ -25,10 +25,14 @@
 连接建立时的 `postgres: <user> <db> <host>(<port>)` 仍会写。已回滚该项设置。
 
 **该泄漏的实际范围**（实测确认）：容器有独立 PID 命名空间，`docker run --rm alpine ps aux`
-只能看到自己。所以**只有把二进制裸跑在同时承载 PG 的宿主机上**才会看到；按仓库自带的
-Docker 部署（应用在容器里、PG 在另一个容器）不可见。当前这台测试机是裸跑，因此
-`ps` 仍有 7 条 `postgres: artex artex`；要彻底消掉需改库名+角色名（数据迁移），
-未擅自执行。
+只能看到自己。所以只有把二进制裸跑在同时承载 PG 的宿主机上才会看到；按仓库自带的
+Docker 部署（应用在容器里、PG 在另一个容器）不可见。
+
+**测试机已执行实际迁移**（裸跑形态，`ps` 可见，故一并处理）：
+`pg_dump -F c` 备份 30MB → 建角色 `pgowner` + 库 `svcdata` → `pg_restore --no-owner --no-acl`
+→ 核对 84 表 / 9 任务 / 58 漏洞 / 362 节点 / 15 提示词一致、序列 `findings_id_seq=59`
+对齐 → 切 DSN 重启。迁移后全机 `ps` 含 artex **0 条**，标题变为 `postgres: pgowner svcdata`。
+旧库 `artex` 保留未删（回滚路径）。口令从脚本移到 `/root/.rt/dbpass`（600），脚本本身 700。
 
 ### v0.5.4 —— 去标识化：子进程环境与进程名
 
