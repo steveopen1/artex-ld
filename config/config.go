@@ -128,13 +128,19 @@ func SkillDir() string {
 
 // PostgresDSN resolves the connection string with precedence:
 //
-//	env ARTEX_PG_DSN  >  config file (database.dsn, or assembled from fields)
+//	env SVC_PG_DSN > env ARTEX_PG_DSN (兼容旧名) > config file (database.dsn, or assembled from fields)
 //
 // There is NO built-in fallback: when neither source supplies a database config,
 // it returns an error naming the config path it inspected, so startup fails loudly
 // instead of silently connecting to a wrong default. source describes where the
 // DSN came from (for startup logging).
 func PostgresDSN() (dsn, source string, err error) {
+	// 去标识化：优先读中性名 SVC_PG_DSN，旧名 ARTEX_PG_DSN 继续兼容（老部署不用改）。
+	// 环境变量名本身也是可被 `docker inspect` / 配置文件看到的产品指纹，
+	// 所以新部署请用中性名；两个都没设才算没配置。
+	if v := strings.TrimSpace(os.Getenv("SVC_PG_DSN")); v != "" {
+		return v, "环境变量 SVC_PG_DSN", nil
+	}
 	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
 		return v, "环境变量 ARTEX_PG_DSN", nil
 	}

@@ -127,7 +127,8 @@ func run() int {
 	}
 
 	go func() {
-		log.Printf("artex %s backend listening on %s (data=%s, workers=%d)", version, *addr, *dataDir, mgr.Workers())
+		// 去标识化：启动日志不带产品名（日志可能被采集/外发）。
+	log.Printf("backend %s listening on %s (data=%s, workers=%d)", version, *addr, *dataDir, mgr.Workers())
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("serve: %v", err)
 		}

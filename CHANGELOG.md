@@ -8,6 +8,28 @@
 
 ### Added
 
+### v0.5.5 —— 部署默认值去标识
+
+- **数据库默认名**：`docker-compose.yml` / `install.sh` 的默认库名与角色名
+  `artex` → `svcdata` / `pgowner`。新部署不会再建出叫 artex 的库 —— 那个名字会
+  出现在 `postgres: <user> <db> ...` 的进程标题里，同机 `ps` 直接可见。
+  老部署不受影响（仍是显式值优先）。
+- **DSN 环境变量名**：新增中性名 `SVC_PG_DSN` 并优先读取，旧名 `ARTEX_PG_DSN`
+  继续兼容（`config/config.go`）。环境变量名本身也会被 `docker inspect` /
+  配置文件看到。实测：启动日志确认「数据库配置来源: 环境变量 SVC_PG_DSN」。
+- **启动日志**：`artex <ver> backend listening` → `backend <ver> listening`
+  （日志可能被采集/外发，不带产品名）。
+
+**关于 `update_process_title`**：试过用 `ALTER SYSTEM SET update_process_title=off`
+让 `ps` 不显示 `user db`，实测无效 —— 该参数只关掉"每次查询更新标题"，
+连接建立时的 `postgres: <user> <db> <host>(<port>)` 仍会写。已回滚该项设置。
+
+**该泄漏的实际范围**（实测确认）：容器有独立 PID 命名空间，`docker run --rm alpine ps aux`
+只能看到自己。所以**只有把二进制裸跑在同时承载 PG 的宿主机上**才会看到；按仓库自带的
+Docker 部署（应用在容器里、PG 在另一个容器）不可见。当前这台测试机是裸跑，因此
+`ps` 仍有 7 条 `postgres: artex artex`；要彻底消掉需改库名+角色名（数据迁移），
+未擅自执行。
+
 ### v0.5.4 —— 去标识化：子进程环境与进程名
 
 实测发现提示词之外还有三条泄漏，都在"agent 自己去看环境"时暴露：
