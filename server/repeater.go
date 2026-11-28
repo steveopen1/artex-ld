@@ -40,6 +40,11 @@ type repeaterSendRequest struct {
 	TimeoutMs          int               `json:"timeout_ms"`
 	InsecureSkipVerify bool              `json:"insecure_skip_verify"`
 	UseRecordingProxy  *bool             `json:"use_recording_proxy"`
+	// AllowLocal 仅供**平台内部调用**设置（不在 JSON schema 里，用 json:"-" 挡掉外部注入）：
+	// 当目标已被本任务授权范围覆盖时，允许访问回环/链路本地地址 —— 否则 CTF、
+	// 本地靶机这类"授权了 127.0.0.1" 的场景永远打不出去。
+	// 安全性由调用方保证：只在 ScopeMatcher 明确放行后设置，且自身端口仍被拒绝。
+	AllowLocal bool `json:"-"`
 }
 
 type repeaterSendResponse struct {
@@ -120,7 +125,8 @@ func (s *Server) executeRepeaterSend(ctx context.Context, in repeaterSendRequest
 	}
 	// This check is needed even when a proxy is used: the proxy must remain usable
 	// for normal targets, while obvious literal metadata/loopback URLs stay blocked.
-	if err := repeaterCheckURL(u); err != nil {
+	// AllowLocal 由平台内部在"目标已授权"时置位（见 runHTTPReplay），外部 JSON 无法注入。
+	if err := repeaterCheckURLScoped(u, in.AllowLocal); err != nil {
 		return repeaterSendResponse{}, err
 	}
 
@@ -167,7 +173,7 @@ func (s *Server) executeRepeaterSend(ctx context.Context, in repeaterSendRequest
 		req.Header.Set(name, value)
 	}
 
-	transport := s.repeaterTransport(useRecordingProxy, in.InsecureSkipVerify)
+	transport := s.repeaterTransport(useRecordingProxy, in.InsecureSkipVerify, in.AllowLocal)
 	if in.HTTPVersion != "" {
 		tr := transport.(*http.Transport)
 		// Keep TLS ALPN consistent with the explicit protocol, even when an
@@ -195,7 +201,7 @@ func (s *Server) executeRepeaterSend(ctx context.Context, in repeaterSendRequest
 			if len(via) >= 10 {
 				return errors.New("重定向次数过多")
 			}
-			if err := repeaterCheckURL(next.URL); err != nil {
+			if err := repeaterCheckURLScoped(next.URL, in.AllowLocal); err != nil {
 				return err
 			}
 			if len(via) > 0 && !strings.EqualFold(next.URL.Host, via[0].URL.Host) {
@@ -249,7 +255,7 @@ func repeaterBodyText(data []byte) string {
 	return strings.ReplaceAll(text, "\x00", "�")
 }
 
-func (s *Server) repeaterTransport(useRecordingProxy, insecure bool) http.RoundTripper {
+func (s *Server) repeaterTransport(useRecordingProxy, insecure, allowLocal bool) http.RoundTripper {
 	var transport *http.Transport
 	proxied := false
 	if useRecordingProxy && s != nil && s.m != nil {
@@ -286,7 +292,11 @@ func (s *Server) repeaterTransport(useRecordingProxy, insecure bool) http.RoundT
 		// Let the request context enforce timeout_ms for the entire dial.
 		transport.DialContext = (&net.Dialer{
 			KeepAlive: 30 * time.Second,
-			Control:   repeaterBlockSensitiveDial,
+			Control: func(_, address string, _ syscall.RawConn) error {
+				// dial 层是最后一道：URL 校验放行了回环，这里也必须同步放行，
+				// 否则请求照样发不出去（实测踩到：URL 过了、dial 被拒）。
+				return repeaterBlockSensitiveDialScoped(address, allowLocal)
+			},
 		}).DialContext
 	}
 	if insecure {
@@ -325,6 +335,44 @@ func repeaterCheckURL(u *url.URL) error {
 	}
 	if strings.EqualFold(host, "localhost") || (ip != nil && repeaterIsBlockedDialIP(ip)) {
 		return fmt.Errorf("拒绝访问本机/链路本地地址（如确需访问本机服务，设置 %s=1）", repeaterAllowLocalEnv)
+	}
+	return nil
+}
+
+// platformOwnPorts 是**永不允许**被重放命中的本机端口：平台 API、录制代理、数据库。
+// 即便目标在授权范围内，agent 也不能反过来打自己所在的平台 —— 那不是"测试目标"，
+// 那是提权/自伤。控制在最小集合，避免误伤正常的本地靶机。
+var platformOwnPorts = map[string]bool{"8787": true, "8788": true, "5432": true}
+
+// repeaterCheckURLScoped 是 repeaterCheckURL 的"授权范围内放宽"版本：
+// allowLocal=true 时跳过回环/链路本地拒绝，但仍：
+//   - 拒绝无法解析的数字主机（避免交给代理自行解释）；
+//   - 拒绝平台自身端口。
+func repeaterCheckURLScoped(u *url.URL, allowLocal bool) error {
+	if !allowLocal {
+		return repeaterCheckURL(u)
+	}
+	if repeaterAllowLocal() {
+		return nil // 运维显式全量放开时以它为准
+	}
+	host := strings.TrimSuffix(strings.TrimSpace(u.Hostname()), ".")
+	if zone := strings.IndexByte(host, '%'); zone >= 0 {
+		host = host[:zone]
+	}
+	if ip := net.ParseIP(host); ip == nil && repeaterLooksNumericHost(host) {
+		if _, ok := repeaterParseLegacyIPv4(host); !ok {
+			return fmt.Errorf("拒绝无法解析的数字主机地址 %q", host)
+		}
+	}
+	if port := u.Port(); port != "" && platformOwnPorts[port] {
+		return fmt.Errorf("拒绝重放命中平台自身端口 %s（不能把测试流量打回平台）", port)
+	}
+	// 无端口时按 scheme 默认端口判断
+	if u.Port() == "" {
+		if (strings.EqualFold(u.Scheme, "http") && platformOwnPorts["80"]) ||
+			(strings.EqualFold(u.Scheme, "https") && platformOwnPorts["443"]) {
+			return fmt.Errorf("拒绝重放命中平台自身端口")
+		}
 	}
 	return nil
 }
@@ -418,7 +466,29 @@ func repeaterIsBlockedDialIP(ip net.IP) bool {
 		ip.IsInterfaceLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }
 
-func repeaterBlockSensitiveDial(_, address string, _ syscall.RawConn) error {
+// repeaterBlockSensitiveDialScoped 是 dial 层的授权感知版本。
+// allowLocal=true（目标已在任务授权范围内）时跳过回环拒绝，但**仍拒绝平台自身端口** ——
+// 校验的是解析后的真实 IP:port，因此也能挡住"域名解析到 127.0.0.1"这类绕过。
+func repeaterBlockSensitiveDialScoped(address string, allowLocal bool) error {
+	if !allowLocal {
+		return repeaterBlockSensitiveDialOnly(address)
+	}
+	if repeaterAllowLocal() {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	if platformOwnPorts[port] {
+		return fmt.Errorf("拒绝重放命中平台自身端口 %s（不能把测试流量打回平台）", port)
+	}
+	// 非本机地址无需额外处理；本机地址在 allowLocal 下放行。
+	_ = host
+	return nil
+}
+
+func repeaterBlockSensitiveDialOnly(address string) error {
 	if repeaterAllowLocal() {
 		return nil
 	}
@@ -434,6 +504,12 @@ func repeaterBlockSensitiveDial(_, address string, _ syscall.RawConn) error {
 		return fmt.Errorf("拒绝访问本机/链路本地地址 %s（如确需访问本机服务，设置 %s=1）", ip, repeaterAllowLocalEnv)
 	}
 	return nil
+}
+
+// repeaterBlockSensitiveDial 保留原签名（net.Dialer.Control 的形态），
+// 供非授权感知的调用点使用。
+func repeaterBlockSensitiveDial(_, address string, _ syscall.RawConn) error {
+	return repeaterBlockSensitiveDialOnly(address)
 }
 
 func repeaterRedactError(err error) string {

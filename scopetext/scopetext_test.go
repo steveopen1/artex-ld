@@ -145,3 +145,30 @@ func TestTargetsShellVariableInURL(t *testing.T) {
 		t.Fatalf("brace: %v", got)
 	}
 }
+
+// TestTargetsFetchPseudoCommand guard 把 WebFetch 的 url 折成 "fetch <url>" 交给
+// 同一个提取器；这条保证该形态确实能被提取（否则 WebFetch 仍是范围校验的盲区）。
+func TestTargetsFetchPseudoCommand(t *testing.T) {
+	got := Targets("fetch https://example.com/a?b=1")
+	if len(got) != 1 || got[0] != "https://example.com/a?b=1" {
+		t.Fatalf("Targets = %v", got)
+	}
+}
+
+// TestTargetsRawSocketForms 覆盖 agent 实测用过的裸 socket 绕过形式：
+// /dev/tcp、openssl -connect。这些不含 scheme，URL 正则抓不到，
+// 且 token 常以 "/" 开头被主机名规则跳过。
+func TestTargetsRawSocketForms(t *testing.T) {
+	cases := []struct{ cmd, want string }{
+		{"exec 3<>/dev/tcp/example.com/80", "example.com"},
+		{"echo > /dev/tcp/10.1.2.3/443", "10.1.2.3"},
+		{"openssl s_client -connect example.com:443", "example.com"},
+		{"openssl s_client -connect 10.0.0.9:8443 -quiet", "10.0.0.9"},
+	}
+	for _, c := range cases {
+		got := Targets(c.cmd)
+		if !contains(got, c.want) {
+			t.Errorf("Targets(%q) = %v，应包含 %q", c.cmd, got, c.want)
+		}
+	}
+}

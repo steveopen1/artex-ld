@@ -1,6 +1,9 @@
 package server
 
-import "testing"
+import (
+	"net/url"
+	"testing"
+)
 
 // TestParseRawRequestHead 锁住 req_head 解析的语义：多值头、折行续接、协议版本。
 // http_replay 的"沿用原始请求"完全依赖这个解析 —— 它错了，重放出来的就不是
@@ -100,5 +103,39 @@ func TestClipRunes(t *testing.T) {
 	}
 	if got := clipRunes("abc", 10); got != "abc" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// TestRepeaterCheckURLScoped 授权范围内的回环地址应放行，但平台自身端口永不放行 ——
+// 否则 agent 可以借"测试本地靶机"反过来打平台 API/录制代理/数据库。
+func TestRepeaterCheckURLScoped(t *testing.T) {
+	if repeaterAllowLocal() {
+		t.Skip("环境变量已全量放开回环，本用例前提不成立")
+	}
+	cases := []struct {
+		raw   string
+		allow bool
+		ok    bool
+	}{
+		{"http://127.0.0.1:8811/login", true, true},   // 授权范围内 + 非平台端口 → 放行
+		{"http://127.0.0.1:8811/login", false, false}, // 未授权 → 仍按 SSRF 规则拒绝
+		{"http://127.0.0.1:8787/api/tasks", true, false}, // 平台 API 端口 → 拒绝
+		{"http://127.0.0.1:8788/", true, false},          // 录制代理端口 → 拒绝
+		{"http://127.0.0.1:5432/", true, false},          // 数据库端口 → 拒绝
+		{"http://169.254.169.254/latest/meta-data", true, true}, // 链路本地：授权后放行（由 scope 决定）
+		// 十六进制形式等价于 127.0.0.1：与点分形式同样放行（端口不在平台自身集合），
+		// 但换成平台端口就必须被拦 —— 端口判据不能因编码形式而失效。
+		{"http://0x7f000001:8811/", true, true},
+		{"http://0x7f000001:8787/", true, false},
+	}
+	for _, c := range cases {
+		u, err := url.Parse(c.raw)
+		if err != nil {
+			t.Fatalf("parse %s: %v", c.raw, err)
+		}
+		err = repeaterCheckURLScoped(u, c.allow)
+		if (err == nil) != c.ok {
+			t.Errorf("%s (allow=%v): err=%v, want ok=%v", c.raw, c.allow, err, c.ok)
+		}
 	}
 }

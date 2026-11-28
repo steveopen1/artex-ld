@@ -124,7 +124,7 @@ func TestRepeaterBlockSensitiveDial(t *testing.T) {
 
 func TestRepeaterTransportBlocksSensitiveDial(t *testing.T) {
 	t.Setenv(repeaterAllowLocalEnv, "")
-	tr := (&Server{}).repeaterTransport(false, false).(*http.Transport)
+	tr := (&Server{}).repeaterTransport(false, false, false).(*http.Transport)
 	defer tr.CloseIdleConnections()
 	if tr.DialContext == nil {
 		t.Fatal("direct transport has no guarded DialContext")
@@ -378,7 +378,7 @@ func TestRepeaterProxyTransportConstruction(t *testing.T) {
 	if tr.TLSClientConfig == nil || tr.TLSClientConfig.RootCAs == nil || !tr.TLSClientConfig.RootCAs.Equal(wantRoots) {
 		t.Fatal("recording proxy CA was not loaded into transport RootCAs")
 	}
-	if s.repeaterTransport(true, false).(*http.Transport).ForceAttemptHTTP2 {
+	if s.repeaterTransport(true, false, false).(*http.Transport).ForceAttemptHTTP2 {
 		t.Fatal("recording proxy transport must not force HTTP/2")
 	}
 }

@@ -8,6 +8,34 @@
 
 ### Added
 
+### v0.6.x —— 实测暴露的四条范围校验漏洞（全部已修）
+
+用「让 agent 自己去打平台自己的防线」的方式做了一次对抗测试（任务 13-16，scope 只给
+`127.0.0.1`，目标 `example.com`），逐条挖出并修掉：
+
+1. **agent 能自我授权（add_task_scope）**：被拦后它调 add_task_scope 给 example.com
+   编了个理由加进范围，拦截随即失效。改为**只能细化不能扩大** —— 新条目必须已被当前
+   范围覆盖（子域之于已授权根域、IP 之于已授权网段），根域/公司/ICP/关键词一律拒绝，
+   指引改为「用 add_task_hint 请求人工补充授权」。
+2. **资产入库是更隐蔽的提权路径（AddAutoScope）**：`insert_assets` 会把该目标自动登记
+   成本任务 scope（source=auto），于是后续所有通道自动放行。同一条"只能细化"规则
+   下沉到 `db.AddAutoScope`。
+3. **WebFetch 完全不在范围校验内**：Bash 被拦后 agent 改用平台自带抓取工具，成功拿到
+   example.com 的 200。guard 的 PreToolUse 新增 WebFetch/fetch 分支，把 url 折成
+   `fetch <url>` 交给同一提取器。实测 `:80`、大写、末尾点等变体全部拦住。
+4. **http_replay 被自家门禁误伤**：①要求"录制开启"才能重放，但重放依据是历史流量，
+   与当前是否录制无关（实测库里有 32 条却报"录制未开启"）；②`repeaterCheckURL` 与
+   **dial 层**两处独立地禁止回环，授权范围内的本地靶机永远打不出去。改为「范围内放行」，
+   新增 `AllowLocal`（json:"-" 防外部注入），但**平台自身端口 8787/8788/5432 永不放行**
+   —— 否则 agent 可以借"测本地靶机"反过来打平台。
+
+另补 `scopetext` 的裸 socket 形式（`/dev/tcp/host/port`、`openssl -connect host:port`）——
+agent 实测用这些绕过了纯 URL 提取。
+
+**仍未覆盖（本轮未修，属网络层）**：`python socket/urllib`、`nc`、`ssh` 等不认
+HTTP_PROXY 的裸连接。文本层抓不到"字符串里的主机名"，代理层也管不到不走代理的客户端。
+彻底解决需在网络上做出口管控（只允许经代理出网），属部署/基础设施改动。
+
 ### v0.5.5 —— 部署默认值去标识
 
 - **数据库默认名**：`docker-compose.yml` / `install.sh` 的默认库名与角色名

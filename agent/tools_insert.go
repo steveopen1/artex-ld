@@ -492,10 +492,33 @@ func (t *ToolSet) addTaskScope() actool.CoreTool {
 			if len(items) == 0 {
 				items = []scopeEntry{a.scopeEntry}
 			}
+			// 授权边界必须写在代码里：**agent 只能把范围写细，不能把范围扩大**。
+			//
+			// 之前 agent 可以调本工具把任意 target 加进 scope —— 实测就发生过：
+			// 被范围校验拦下后，它调 add_task_scope 给 example.com 编了个理由
+			// ("任务目标要求访问它")，于是自我授权、拦截失效。
+			// 这不是模型的错，"我自己决定我能打哪" 本来就不该是 agent 的权力。
+			//
+			// 规则：新条目必须已被**当前范围**覆盖（子域之于已授权根域、IP 之于
+			// 已授权网段）。也就是只能补充/细化，无法新增根域、公司、ICP、关键词。
+			// 真正需要扩范围时，agent 应通过 add_task_hint 交人工在任务设置页处理。
+			cur := db.BuildScopeMatcher(nil, nil)
+			if rows, err := t.as.ListTaskScope(t.taskID); err == nil {
+				cur = db.BuildScopeMatcher(rows, nil)
+			}
+
 			var added []map[string]any
 			errs := map[string]string{}
 			for i, e := range items {
-				ts, err := t.as.AddAgentScope(t.taskID, strings.TrimSpace(e.Kind), e.Value, a.Reason, "agent")
+				kind := strings.TrimSpace(e.Kind)
+				val := strings.TrimSpace(e.Value)
+				if !agentScopeWithinCurrent(cur, kind, val) {
+					errs[strconv.Itoa(i)] = "拒绝：目标 " + val + "（kind=" + kind + "）不在当前任务授权范围内。" +
+						"agent 只能补充/细化已被授权的目标（例如为已授权根域添加子域），不能自行新增范围。" +
+						"如确实需要扩大授权，请调用 add_task_hint 说明理由，由人工在任务设置里添加。"
+					continue
+				}
+				ts, err := t.as.AddAgentScope(t.taskID, kind, e.Value, a.Reason, "agent")
 				if err != nil {
 					errs[strconv.Itoa(i)] = err.Error()
 					continue
@@ -509,6 +532,29 @@ func (t *ToolSet) addTaskScope() actool.CoreTool {
 			return jsonResult(out)
 		},
 	)
+}
+
+// agentScopeWithinCurrent 判断 agent 想添加的一条 scope 是否只是"细化"当前范围。
+//
+// 判定方式是把这个值喂给当前 matcher 的 InScope：
+//   - subdomain "api.example.com" 在 example.com 已授权时 → true（细化，允许）
+//   - root_domain "example.com" 本身不在范围里 → false（扩大，拒绝）
+//   - ip 落在已授权网段内 → true；否则 false
+//   - company / icp / keyword 这类"面上扩大"的类型一律无法通过 → 拒绝
+//
+// 之所以复用 InScope 而不是按 kind 写白名单：范围匹配的语义（根域后缀、CIDR 包含、
+// 精确 IP）已经在 db.ScopeMatcher 里定义过一遍了，再写一套必然和实际拦截口径漂移。
+func agentScopeWithinCurrent(cur *db.ScopeMatcher, kind, value string) bool {
+	if cur == nil || !cur.HasAny {
+		return false // 任务没有任何授权范围时，agent 不能凭空造一个
+	}
+	switch kind {
+	case "subdomain", "ip", "cidr":
+		return cur.InScope(value)
+	default:
+		// root_domain / company / icp / keyword：都是把授权面整体放大
+		return false
+	}
 }
 
 // listUntestedAssets lets the plan agent pull the current + directly inherited

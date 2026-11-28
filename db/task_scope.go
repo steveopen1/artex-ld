@@ -117,13 +117,23 @@ func (s *AssetStore) AddAutoScope(taskID int64, assetType, domain, rawURL, ip st
 	if taskID <= 0 {
 		return nil
 	}
+	// 授权边界必须写在代码里：**自动登记只能"细化"已有范围，不能扩大范围**。
+	//
+	// 之前的洞（实测踩到）：agent 想访问范围外目标时，先 insert_assets 把该目标
+	// 登记成资产，这条自动 scope 就把它加进了授权范围 —— 于是范围校验对后续
+	// 所有通道（Bash / WebFetch / http_replay）全部失效。也就是说"插资产"本身
+	// 就是一条提权路径，比 add_task_scope 更隐蔽。
+	//
+	// 现在：候选 scope 必须已被当前范围覆盖（子域之于已授权根域、IP 之于已授权
+	// 网段），否则只是登记资产、不扩范围。扩范围只能由人在任务设置里做。
+	cur := s.currentScopeMatcher(taskID)
 	switch assetType {
 	case "root_domain":
-		if d := DomainKey(domain); d != "" {
+		if d := DomainKey(domain); d != "" && cur.InScope(d) {
 			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "root_domain", Domain: d})
 		}
 	case "subdomain":
-		if d := DomainKey(domain); d != "" {
+		if d := DomainKey(domain); d != "" && cur.InScope(d) {
 			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "subdomain", Domain: d})
 		}
 	case "service", "endpoint":
@@ -132,19 +142,30 @@ func (s *AssetStore) AddAutoScope(taskID int64, assetType, domain, rawURL, ip st
 			host, _, _ = parseURL(normalizeURL(rawURL))
 		}
 		host = DomainKey(host)
-		if host != "" && net.ParseIP(host) == nil {
+		if host != "" && net.ParseIP(host) == nil && cur.InScope(host) {
 			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "subdomain", Domain: host})
 		}
 		// IP-literal host or no host → fall back to ip scope if we have one.
-		if c := ipToHostCIDR(ip); c != "" {
+		if c := ipToHostCIDR(ip); c != "" && cur.InScope(c) {
 			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "ip", Net: c})
 		}
 	case "ip":
-		if c := ipToHostCIDR(ip); c != "" {
+		if c := ipToHostCIDR(ip); c != "" && cur.InScope(c) {
 			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "ip", Net: c})
 		}
 	}
 	return nil
+}
+
+// currentScopeMatcher 构造该任务**当前**的授权范围匹配器（不含 company 展开，
+// 因为自动登记只发生在具体主机/网段粒度上，公司级范围已由人工显式授权）。
+// 读失败时返回空匹配器 —— 空匹配器拒绝一切，宁可少扩范围也不误扩。
+func (s *AssetStore) currentScopeMatcher(taskID int64) *ScopeMatcher {
+	rows, err := s.ListTaskScope(taskID)
+	if err != nil {
+		return EmptyScopeMatcher()
+	}
+	return BuildScopeMatcher(rows, nil)
 }
 
 // AddAgentScope parses a (kind,value) pair and records it as task scope.

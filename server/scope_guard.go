@@ -70,9 +70,13 @@ func (s *Server) checkCommandScope(ctx context.Context, taskID int64, tool, comm
 	if len(out) == 0 {
 		return false, ""
 	}
+	// 指引必须指向**真正可行**的动作：add_task_scope 现在只允许"细化"（为已授权
+	// 根域加子域等），不能新增范围；扩范围只能由人来做。写成"去调 add_task_scope"
+	// 会让 agent 反复撞墙（实测就是这样）。
 	reason := fmt.Sprintf(
 		"【平台管控·范围校验】命令里的目标 %s 不在本任务授权范围内，已拒绝执行。"+
-			"如需测试请先通过 add_task_scope / add_company_scope 扩大授权范围，不要重试同一目标。",
+			"扩大授权需人工审批：请用 add_task_hint 说明理由并请求补充授权，不要重试同一目标，"+
+			"也不要试图用其它工具绕过。",
 		quoteList(out))
 	s.auditCommandScope(taskID, tool, command, out, reason)
 	return true, reason

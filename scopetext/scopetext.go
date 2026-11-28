@@ -36,6 +36,14 @@ var (
 
 	// 形如 host.tld 的 token（用于网络工具上下文下的裸主机名提取）。
 	reHostToken = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9\-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9\-]{0,62}))+\.[A-Za-z]{2,24}$`)
+
+	// bash 的 /dev/tcp 与 /dev/udp 重定向：`echo > /dev/tcp/host/80`。
+	// 实测被 agent 用来绕过（token 以 "/" 开头，原先会被跳过）。
+	// 这条几乎不可能有误报 —— /dev/tcp 就是 bash 的裸 socket 语法。
+	reDevTCP = regexp.MustCompile(`/dev/(?:tcp|udp)/([A-Za-z0-9.\-]+|\[[0-9a-fA-F:]+\])/(\d{1,5})`)
+
+	// openssl s_client -connect host:port / nc host port 这类"主机+端口"组合。
+	reConnectFlag = regexp.MustCompile(`(?:-connect|--connect)[\s=]+([A-Za-z0-9.\-]+|\[[0-9a-fA-F:]+\]):(\d{1,5})`)
 )
 
 // networkTools 是"会主动建立网络连接"的命令名。只有当命令里出现其中之一，
@@ -97,6 +105,16 @@ func Targets(cmd string) []string {
 	for _, m := range reURL.FindAllString(cmd, -1) {
 		push(m)
 	}
+	// 1b) bash /dev/tcp 与 openssl/nc 的 host:port 组合 —— 高置信度的裸 socket 用法。
+	//     这两类不含 scheme，URL 正则抓不到，且 token 常以 "/" 开头被主机名规则跳过，
+	//     实测是 agent 的绕过首选。
+	for _, m := range reDevTCP.FindAllStringSubmatch(cmd, -1) {
+		push(m[1])
+	}
+	for _, m := range reConnectFlag.FindAllStringSubmatch(cmd, -1) {
+		push(m[1])
+	}
+
 	// URL 里已经带了目标，先把它们从文本里扣掉，避免同一目标被后面的
 	// IP/主机名规则重复提取（http://10.0.0.1:8080 不应同时产出 "10.0.0.1:8080"）。
 	scrubbed := reURL.ReplaceAllString(cmd, " ")

@@ -125,6 +125,18 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		}
 		_ = json.Unmarshal(ev.Input, &in)
 		cmd = in.Text
+	// 平台自带的抓取工具同样会发出真实网络请求。
+	// 实测漏过：Bash 里的越界 URL 被 bash 层范围校验拦下后，agent 改用 WebFetch
+	// 访问同一地址，成功拿到 200 —— 说明"只校验命令文本"是不够的，凡是能出网的
+	// 工具都要过同一道关。这里把它折成一条伪命令交给同一个提取器，复用既有逻辑。
+	case "WebFetch", "fetch":
+		var in struct {
+			URL string `json:"url"`
+		}
+		_ = json.Unmarshal(ev.Input, &in)
+		if strings.TrimSpace(in.URL) != "" {
+			cmd = "fetch " + in.URL
+		}
 	}
 	result := g.applyIntercept(ctx, ev, cmd)
 	if result.Decision == "block" {

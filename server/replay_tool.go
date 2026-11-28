@@ -104,9 +104,14 @@ func (s *Server) runHTTPReplay(ctx context.Context, raw json.RawMessage) (actool
 	if id == "" {
 		return actool.Errorf("id 必填：先用 traffic_search 找到目标流量的 exchange id"), nil
 	}
-	if s.m.Traffic() == nil || !s.m.TrafficEnabled() {
-		return actool.Errorf("流量录制未开启，无法重放（重放以已录制的原始请求为基准）"), nil
+	// 只要求"流量存储可用"，**不要求当前正在录制**。
+	// 重放的依据是历史已录的那条请求，与此刻是否开着录制无关；之前把
+	// TrafficEnabled 当门槛，导致"有历史流量但录制关着"时重放被无谓拒绝
+	// （实测踩到：库里有 32 条 127.0.0.1 的录制，却报"录制未开启"）。
+	if s.m.Traffic() == nil {
+		return actool.Errorf("流量存储不可用，无法重放"), nil
 	}
+	recording := s.m.TrafficEnabled()
 
 	// 取原始请求。ReadEvidence 的回调期间才保证 blob reader 有效，所以解析与
 	// 覆盖都必须在这个回调里做完 —— 出了回调原始请求体就读不到了。
@@ -211,14 +216,24 @@ func (s *Server) runHTTPReplay(ctx context.Context, raw json.RawMessage) (actool
 			redactURLCreds(rawURL))), nil
 	}
 
+	useProxy := a.UseRecordingProxy
+	if useProxy == nil {
+		// 未显式指定时跟随实际状态：录制开着就经录制代理（顺带把这次重放也录成证据），
+		// 关着就直连 —— 否则会连一个没在监听的端口。
+		v := recording
+		useProxy = &v
+	}
+	// 目标已在授权范围内 → 允许回环/链路本地（本地靶机、CTF 场景常见）。
+	// 平台自身端口在 repeaterCheckURLScoped 里另有拦截，不会被重放命中。
 	in := repeaterSendRequest{
+		AllowLocal:         matcher.InScope(rawURL),
 		Method:             &method,
 		URL:                rawURL,
 		Headers:            headers,
 		Body:               body,
 		TimeoutMs:          a.TimeoutMs,
 		HTTPVersion:        ver,
-		UseRecordingProxy:  a.UseRecordingProxy,
+		UseRecordingProxy:  useProxy,
 		InsecureSkipVerify: a.InsecureSkipVerify,
 	}
 	resp, serr := s.executeRepeaterSend(ctx, in)
